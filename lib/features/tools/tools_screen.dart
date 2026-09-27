@@ -1,82 +1,169 @@
 import 'package:flutter/material.dart';
 import '../../core/widgets/ui.dart';
+import '../calculators/number_system_calculator_screen.dart';
+import '../calculators/binary_calculator_screen.dart';
+import '../calculators/bitwise_calculator_screen.dart';
+import '../calculators/electronics_calculator_screen.dart';
+import '../calculators/physics_calculator_screen.dart';
+import '../calculators/calculus_calculator_screen.dart';
+import '../calculators/networking_calculator_screen.dart';
 import '../simulators/cpu_scheduling_screen.dart';
 
 class ToolsScreen extends StatelessWidget {
   const ToolsScreen({super.key});
+
   @override
-  Widget build(BuildContext context) => PageFrame(
+  Widget build(BuildContext context) {
+    return PageFrame(
       title: 'Tools',
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Engineering tools',
-            style: TextStyle(fontWeight: FontWeight.w700)),
-        const SectionTitle('Electronics'),
-        ListTile(
-            leading: const Icon(Icons.bolt_outlined),
-            title: const Text('Ohm’s Law'),
-            subtitle:
-                const Text('Calculate resistance from voltage and current'),
-            onTap: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const OhmsLawScreen()))),
-        const SectionTitle('Computer Systems'),
-        ListTile(
-            leading: const Icon(Icons.timeline_outlined),
-            title: const Text('CPU Scheduling'),
-            subtitle: const Text(
-                'Run FCFS, SJF, SRTF, Round Robin, and Priority simulations'),
-            onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const CpuSchedulingScreen()))),
-      ]));
-}
-
-class OhmsLawScreen extends StatefulWidget {
-  const OhmsLawScreen({super.key});
-  @override
-  State<OhmsLawScreen> createState() => _OhmsLawScreenState();
-}
-
-class _OhmsLawScreenState extends State<OhmsLawScreen> {
-  final voltage = TextEditingController();
-  final current = TextEditingController();
-  String result = 'Enter voltage and current.';
-  @override
-  void dispose() {
-    voltage.dispose();
-    current.dispose();
-    super.dispose();
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _Category(
+            title: 'Number Systems',
+            items: [
+              _ToolItem(
+                'Number System Calculator',
+                Icons.numbers_outlined,
+                'Binary, decimal, octal, hex',
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            const NumberSystemCalculatorScreen())),
+              ),
+              _ToolItem(
+                'Binary Calculator',
+                Icons.calculate_outlined,
+                'Add, subtract, multiply, divide, logic',
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const BinaryCalculatorScreen())),
+              ),
+              _ToolItem(
+                'Bitwise Calculator',
+                Icons.grid_on_outlined,
+                'AND, OR, XOR, NOT, shifts',
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const BitwiseCalculatorScreen())),
+              ),
+            ],
+          ),
+          _Category(
+            title: 'Electronics',
+            items: [
+              _ToolItem(
+                'Electronics Calculators',
+                Icons.bolt_outlined,
+                'Ohm\'s law, dividers, LED, RC',
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const ElectronicsCalculatorScreen())),
+              ),
+            ],
+          ),
+          _Category(
+            title: 'Physics',
+            items: [
+              _ToolItem(
+                'Physics Calculators',
+                Icons.science_outlined,
+                'Motion, force, energy, waves',
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const PhysicsCalculatorScreen())),
+              ),
+            ],
+          ),
+          _Category(
+            title: 'Calculus',
+            items: [
+              _ToolItem(
+                'Calculus Calculators',
+                Icons.functions_outlined,
+                'Derivatives, integrals, limits',
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const CalculusCalculatorScreen())),
+              ),
+            ],
+          ),
+          _Category(
+            title: 'Networking',
+            items: [
+              _ToolItem(
+                'Networking Calculators',
+                Icons.lan_outlined,
+                'IPv4, CIDR, subnet, data rate',
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const NetworkingCalculatorScreen())),
+              ),
+            ],
+          ),
+          _Category(
+            title: 'Simulators',
+            items: [
+              _ToolItem(
+                'CPU Scheduling Simulator',
+                Icons.timeline_outlined,
+                'FCFS, SJF, SRTF, RR, Priority',
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const CpuSchedulingScreen())),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
+}
+
+class _Category extends StatelessWidget {
+  const _Category({required this.title, required this.items});
+  final String title;
+  final List<_ToolItem> items;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-      appBar: AppBar(title: const Text('Ohm’s Law')),
-      body: Padding(
-          padding: const EdgeInsets.all(20),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('R = V ÷ I'),
-            const SizedBox(height: 16),
-            TextField(
-                controller: voltage,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Voltage (V)')),
-            const SizedBox(height: 12),
-            TextField(
-                controller: current,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Current (A)')),
-            const SizedBox(height: 16),
-            FilledButton(
-                onPressed: () {
-                  final v = double.tryParse(voltage.text);
-                  final i = double.tryParse(current.text);
-                  setState(() => result = v == null || i == null || i == 0
-                      ? 'Enter valid values; current cannot be zero.'
-                      : 'Resistance: ${(v / i).toStringAsFixed(2)} Ω');
-                },
-                child: const Text('Calculate')),
-            const SizedBox(height: 16),
-            Text(result, style: Theme.of(context).textTheme.titleMedium),
-          ])));
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionTitle(title),
+        for (final item in items)
+          Card(
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor:
+                    Theme.of(context).colorScheme.primaryContainer,
+                child: Icon(item.icon,
+                    color:
+                        Theme.of(context).colorScheme.onPrimaryContainer),
+              ),
+              title: Text(item.title,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(item.subtitle),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: item.onTap,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ToolItem {
+  const _ToolItem(this.title, this.icon, this.subtitle, this.onTap);
+  final String title, subtitle;
+  final IconData icon;
+  final VoidCallback onTap;
 }

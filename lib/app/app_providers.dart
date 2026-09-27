@@ -1,70 +1,181 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../data/repositories/companion_repository.dart';
 import '../domain/entities/entities.dart';
+import '../domain/services/progress_service.dart';
 
-final repositoryProvider = Provider((ref) => CompanionRepository());
+final repositoryProvider = Provider<CompanionRepository>((ref) {
+  final repository = CompanionRepository();
+  ref.onDispose(repository.close);
+  return repository;
+});
+
+final sharedPreferencesProvider = FutureProvider<SharedPreferences>((ref) async {
+  return SharedPreferences.getInstance();
+});
+
 final themeModeProvider =
-    NotifierProvider<ThemeModeNotifier, ThemeMode>(ThemeModeNotifier.new);
+    AsyncNotifierProvider<ThemeModeNotifier, ThemeMode>(ThemeModeNotifier.new);
 
-class ThemeModeNotifier extends Notifier<ThemeMode> {
+class ThemeModeNotifier extends AsyncNotifier<ThemeMode> {
   @override
-  ThemeMode build() => ThemeMode.system;
-  void set(ThemeMode mode) => state = mode;
+  Future<ThemeMode> build() async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    return switch (prefs.getString('theme_mode')) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+  }
+
+  Future<void> set(ThemeMode mode) async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    await prefs.setString('theme_mode', switch (mode) {
+      ThemeMode.light => 'light',
+      ThemeMode.dark => 'dark',
+      ThemeMode.system => 'system',
+    });
+    state = AsyncData(mode);
+  }
 }
 
 final profileNameProvider =
-    NotifierProvider<ProfileNameNotifier, String>(ProfileNameNotifier.new);
+    AsyncNotifierProvider<ProfileNameNotifier, String>(ProfileNameNotifier.new);
 
-class ProfileNameNotifier extends Notifier<String> {
+class ProfileNameNotifier extends AsyncNotifier<String> {
   @override
-  String build() => 'Student';
-  void set(String value) =>
-      state = value.trim().isEmpty ? 'Tommy' : value.trim();
+  Future<String> build() async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    return prefs.getString('profile_name') ?? 'Student';
+  }
+
+  Future<void> set(String value) async {
+    final name = value.trim().isEmpty ? 'Student' : value.trim();
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    await prefs.setString('profile_name', name);
+    state = AsyncData(name);
+  }
 }
 
 final subjectsProvider =
-    NotifierProvider<SubjectsNotifier, List<Subject>>(SubjectsNotifier.new);
+    FutureProvider<List<Subject>>((ref) async {
+  final repository = ref.watch(repositoryProvider);
+  return repository.loadSubjects();
+});
 
-class SubjectsNotifier extends Notifier<List<Subject>> {
-  @override
-  List<Subject> build() => ref.read(repositoryProvider).subjects();
-  Future<void> complete(Subject subject) async {
-    await ref.read(repositoryProvider).completeLesson(subject);
-    state = ref.read(repositoryProvider).subjects();
-    ref.invalidate(activityProvider);
-  }
+final subjectDetailProvider =
+    FutureProvider.family<SubjectDetail, int>((ref, subjectId) async {
+  final repository = ref.watch(repositoryProvider);
+  final subjects = await repository.loadSubjects();
+  final subject = subjects.firstWhere((s) => s.id == subjectId);
+  final lessons = await repository.loadLessons(subjectId);
+  return SubjectDetail(subject: subject, lessons: lessons);
+});
+
+class SubjectDetail {
+  const SubjectDetail({required this.subject, required this.lessons});
+  final Subject subject;
+  final List<Lesson> lessons;
 }
 
-final activityProvider = Provider<List<ActivityItem>>(
-    (ref) => ref.read(repositoryProvider).activities());
-final notesProvider =
-    NotifierProvider<NotesNotifier, List<Note>>(NotesNotifier.new);
+final lessonDetailProvider =
+    FutureProvider.family<LessonDetail, int>((ref, lessonId) async {
+  final repository = ref.watch(repositoryProvider);
+  final lesson = await repository.loadLesson(lessonId);
+  final topics = await repository.loadTopics(lessonId);
+  return LessonDetail(lesson: lesson, topics: topics);
+});
 
-class NotesNotifier extends Notifier<List<Note>> {
+class LessonDetail {
+  const LessonDetail({required this.lesson, required this.topics});
+  final Lesson? lesson;
+  final List<Topic> topics;
+}
+
+final activitiesProvider =
+    FutureProvider<List<ActivityItem>>((ref) async {
+  final repository = ref.watch(repositoryProvider);
+  return repository.loadActivities();
+});
+
+final quizAttemptsProvider =
+    FutureProvider<List<QuizAttempt>>((ref) async {
+  final repository = ref.watch(repositoryProvider);
+  return repository.loadQuizAttempts();
+});
+
+final notesProvider = AsyncNotifierProvider<NotesNotifier, List<Note>>(NotesNotifier.new);
+
+class NotesNotifier extends AsyncNotifier<List<Note>> {
   @override
-  List<Note> build() => ref.read(repositoryProvider).notes();
+  Future<List<Note>> build() async {
+    final repository = ref.watch(repositoryProvider);
+    return repository.loadNotes();
+  }
+
   Future<void> save(Note note) async {
-    await ref.read(repositoryProvider).saveNote(note);
-    state = ref.read(repositoryProvider).notes();
+    final repository = ref.read(repositoryProvider);
+    await repository.saveNote(note);
+    state = AsyncData(await repository.loadNotes());
   }
 
   Future<void> remove(int id) async {
-    await ref.read(repositoryProvider).deleteNote(id);
-    state = ref.read(repositoryProvider).notes();
+    final repository = ref.read(repositoryProvider);
+    await repository.deleteNote(id);
+    state = AsyncData(await repository.loadNotes());
   }
 }
 
-final bookmarkProvider =
-    NotifierProvider<BookmarksNotifier, Set<String>>(BookmarksNotifier.new);
+final bookmarksProvider =
+    AsyncNotifierProvider<BookmarksNotifier, List<Bookmark>>(BookmarksNotifier.new);
 
-class BookmarksNotifier extends Notifier<Set<String>> {
+class BookmarksNotifier extends AsyncNotifier<List<Bookmark>> {
   @override
-  Set<String> build() => ref.read(repositoryProvider).bookmarks();
-  Future<void> toggle(String key) async {
-    await ref.read(repositoryProvider).toggleBookmark(key);
-    final next = {...state};
-    next.contains(key) ? next.remove(key) : next.add(key);
-    state = next;
+  Future<List<Bookmark>> build() async {
+    final repository = ref.watch(repositoryProvider);
+    return repository.loadBookmarks();
+  }
+
+  Future<bool> toggle(String itemType, int itemId, String label) async {
+    final repository = ref.read(repositoryProvider);
+    final wasBookmarked = await repository.isBookmarked(itemType, itemId);
+    await repository.toggleBookmark(itemType, itemId, label);
+    state = AsyncData(await repository.loadBookmarks());
+    return !wasBookmarked;
   }
 }
+
+final progressServiceProvider = Provider<ProgressService>((ref) {
+  return const ProgressService();
+});
+
+final progressStatsProvider =
+    FutureProvider<ProgressStats>((ref) async {
+  final repository = ref.watch(repositoryProvider);
+  final subjects = await repository.loadSubjects();
+  final lessons = <Lesson>[];
+  for (final subject in subjects) {
+    lessons.addAll(await repository.loadLessons(subject.id));
+  }
+  final attempts = await repository.loadQuizAttempts();
+  final sessions = await repository.loadStudySessions();
+  return ref.read(progressServiceProvider).computeStats(
+        subjects: subjects,
+        allLessons: lessons,
+        attempts: attempts,
+        sessions: sessions,
+      );
+});
+
+final formulasProvider =
+    FutureProvider.family<List<Formula>, String?>((ref, category) async {
+  final repository = ref.watch(repositoryProvider);
+  return repository.loadFormulas(category: category);
+});
+
+final referencesProvider =
+    FutureProvider.family<List<ProgrammingReference>, String?>((ref, language) async {
+  final repository = ref.watch(repositoryProvider);
+  return repository.loadReferences(language: language);
+});

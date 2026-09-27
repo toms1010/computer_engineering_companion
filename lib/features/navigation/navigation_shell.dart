@@ -7,64 +7,95 @@ import '../settings/settings_screen.dart';
 
 class NavigationShell extends StatefulWidget {
   const NavigationShell({super.key});
+
   @override
   State<NavigationShell> createState() => _NavigationShellState();
 }
 
 class _NavigationShellState extends State<NavigationShell> {
-  int index = 0;
-  final screens = const [
+  int _index = 0;
+
+  static const _screens = [
     HomeScreen(),
     LearningScreen(),
     PracticeScreen(),
     ToolsScreen(),
-    SettingsScreen()
+    SettingsScreen(),
   ];
-  final labels = ['Home', 'Learn', 'Practice', 'Tools', 'Settings'];
-  final icons = [
-    Icons.home_outlined,
-    Icons.menu_book_outlined,
-    Icons.assignment_outlined,
-    Icons.handyman_outlined,
-    Icons.settings_outlined
+
+  static const _destinations = [
+    _NavItem('Home', Icons.home_outlined, Icons.home),
+    _NavItem('Learn', Icons.menu_book_outlined, Icons.menu_book),
+    _NavItem('Practice', Icons.quiz_outlined, Icons.quiz),
+    _NavItem('Tools', Icons.handyman_outlined, Icons.handyman),
+    _NavItem('Settings', Icons.settings_outlined, Icons.settings),
   ];
+
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 600;
-    final content = IndexedStack(index: index, children: screens);
-    if (!wide)
+    final width = MediaQuery.sizeOf(context).width;
+    final isWide = width >= 600;
+    final content = IndexedStack(index: _index, children: _screens);
+
+    if (!isWide) {
       return Scaffold(
-          body: content,
-          bottomNavigationBar: NavigationBar(
-              selectedIndex: index,
-              onDestinationSelected: (value) => setState(() => index = value),
-              destinations: List.generate(
-                  5,
-                  (i) => NavigationDestination(
-                      icon: Icon(icons[i]),
-                      selectedIcon: Icon(icons[i]),
-                      label: labels[i]))));
+        body: content,
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (value) => setState(() => _index = value),
+          destinations: [
+            for (final d in _destinations)
+              NavigationDestination(
+                icon: Icon(d.icon),
+                selectedIcon: Icon(d.selectedIcon),
+                label: d.label,
+              ),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
-        body: Row(children: [
-      NavigationRail(
-          extended: MediaQuery.sizeOf(context).width > 1024,
-          selectedIndex: index,
-          onDestinationSelected: (value) => setState(() => index = value),
-          leading: Padding(
+      body: Row(
+        children: [
+          NavigationRail(
+            extended: width >= 1024,
+            selectedIndex: _index,
+            onDestinationSelected: (value) => setState(() => _index = value),
+            leading: Padding(
               padding: const EdgeInsets.fromLTRB(16, 24, 16, 20),
-              child: MediaQuery.sizeOf(context).width > 1024
-                  ? const Text('COMPUTER\nENGINEERING\nCOMPANION',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w800, letterSpacing: 1.2))
-                  : const Icon(Icons.memory)),
-          destinations: List.generate(
-              5,
-              (i) => NavigationRailDestination(
-                  icon: Icon(icons[i]),
-                  selectedIcon: Icon(icons[i]),
-                  label: Text(labels[i])))),
-      const VerticalDivider(width: 1),
-      Expanded(child: content)
-    ]));
+              child: width >= 1024
+                  ? const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.memory, size: 28),
+                        SizedBox(height: 8),
+                        Text('CEC',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w800, fontSize: 16)),
+                      ],
+                    )
+                  : const Icon(Icons.memory, size: 28),
+            ),
+            destinations: [
+              for (final d in _destinations)
+                NavigationRailDestination(
+                  icon: Icon(d.icon),
+                  selectedIcon: Icon(d.selectedIcon),
+                  label: Text(d.label),
+                ),
+            ],
+          ),
+          const VerticalDivider(width: 1),
+          Expanded(child: content),
+        ],
+      ),
+    );
   }
+}
+
+class _NavItem {
+  const _NavItem(this.label, this.icon, this.selectedIcon);
+  final String label;
+  final IconData icon, selectedIcon;
 }
