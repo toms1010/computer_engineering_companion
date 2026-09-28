@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
-import '../../core/widgets/ui.dart';
-import '../../domain/services/number_system_service.dart';
 
+import '../../core/design/app_spacing.dart';
+import '../../domain/services/number_system_service.dart';
+import '../../widgets/app_scaffold.dart';
+import '../../widgets/cards.dart';
+import '../../widgets/inputs.dart';
+import '../../widgets/performance_watcher.dart';
+
+/// Bitwise operations on decimal integers, with binary and hex read-outs.
 class BitwiseCalculatorScreen extends StatefulWidget {
   const BitwiseCalculatorScreen({super.key});
 
@@ -17,7 +23,21 @@ class _BitwiseCalculatorScreenState extends State<BitwiseCalculatorScreen> {
   BitwiseResult? _result;
   String? _error;
 
-  final _service = const BitwiseCalculatorService();
+  static const _service = BitwiseCalculatorService();
+
+  static const _operations = [
+    DropdownMenuItem(value: BitwiseOperation.and, child: Text('AND (&)')),
+    DropdownMenuItem(value: BitwiseOperation.or, child: Text('OR (|)')),
+    DropdownMenuItem(value: BitwiseOperation.xor, child: Text('XOR (^)')),
+    DropdownMenuItem(
+        value: BitwiseOperation.nand, child: Text('NAND (⊼)')),
+    DropdownMenuItem(value: BitwiseOperation.nor, child: Text('NOR (⊽)')),
+    DropdownMenuItem(
+        value: BitwiseOperation.shiftLeft, child: Text('Shift left (<<)')),
+    DropdownMenuItem(
+        value: BitwiseOperation.shiftRight, child: Text('Shift right (>>)')),
+    DropdownMenuItem(value: BitwiseOperation.not, child: Text('NOT (~)')),
+  ];
 
   @override
   void dispose() {
@@ -49,13 +69,16 @@ class _BitwiseCalculatorScreenState extends State<BitwiseCalculatorScreen> {
       }
     }
     try {
+      // Computed outside setState: the work happens once, and only the
+      // assignments are inside the rebuild.
+      final computed = _service.compute(_op, a, b ?? 0);
       setState(() {
-        _result = _service.compute(_op, a, b ?? 0);
+        _result = computed;
         _error = null;
       });
-    } catch (e) {
+    } on Object catch (error) {
       setState(() {
-        _error = e.toString();
+        _error = 'Could not compute that: $error';
         _result = null;
       });
     }
@@ -63,90 +86,117 @@ class _BitwiseCalculatorScreenState extends State<BitwiseCalculatorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Bitwise Calculator')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(
-            controller: _aController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Value A (decimal)',
-              hintText: 'e.g. 170',
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (_needsB)
-            TextField(
-              controller: _bController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Value B (decimal)',
-                hintText: 'e.g. 204',
+    final result = _result;
+
+    return ScreenPerformanceWatcher(
+      name: 'Bitwise calculator',
+      child: AppScaffold(
+        title: 'Bitwise calculator',
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.gutter),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: _aController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Value A (decimal)',
+                      hintText: 'e.g. 170',
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  if (_needsB)
+                    TextField(
+                      key: const ValueKey('field-b'),
+                      controller: _bController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Value B (decimal)',
+                        hintText: 'e.g. 204',
+                      ),
+                    ),
+                  const SizedBox(height: AppSpacing.lg),
+                  DropdownButtonFormField<BitwiseOperation>(
+                    initialValue: _op,
+                    decoration: const InputDecoration(labelText: 'Operation'),
+                    items: _operations,
+                    onChanged: (value) {
+                      if (value != null) setState(() => _op = value);
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  FilledButton.icon(
+                    onPressed: _calculate,
+                    icon: const Icon(Icons.calculate),
+                    label: const Text('Calculate'),
+                  ),
+                  if (_error != null) ErrorBanner(message: _error!),
+                ],
               ),
             ),
-          const SizedBox(height: 16),
-          DropdownButtonFormField<BitwiseOperation>(
-            initialValue: _op,
-            decoration: const InputDecoration(labelText: 'Operation'),
-            items: [
-              for (final op in BitwiseOperation.values)
-                DropdownMenuItem(
-                    value: op, child: Text('${op.label} (${op.symbol})')),
-            ],
-            onChanged: (v) {
-              if (v != null) setState(() => _op = v);
-            },
           ),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: _calculate,
-            icon: const Icon(Icons.calculate),
-            label: const Text('Calculate'),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 16),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
+          if (result != null) ...[
+            const SliverSectionHeader(title: 'Result'),
+            SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!,
-                    style: TextStyle(
-                        color:
-                            Theme.of(context).colorScheme.onErrorContainer)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+                child: Column(
+                  children: [
+                    ResultCard(
+                      label: 'Binary',
+                      value: result.result,
+                      icon: Icons.code,
+                      onCopy: () => copyToClipboard(context, result.result),
+                    ),
+                    ResultCard(
+                      label: 'Decimal',
+                      value: '${result.decimalResult}',
+                      icon: Icons.tag,
+                    ),
+                    ResultCard(
+                      label: 'Hexadecimal',
+                      value: result.hexResult,
+                      icon: Icons.hexagon_outlined,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ],
-          if (_result != null) ...[
-            const SizedBox(height: 20),
-            Text('Result',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 10),
-            ResultCard(
-                label: 'Binary', value: _result!.result, icon: Icons.code),
-            ResultCard(
-                label: 'Decimal', value: '${_result!.decimalResult}', icon: Icons.tag),
-            ResultCard(
-                label: 'Hexadecimal', value: _result!.hexResult, icon: Icons.hexagon_outlined),
-            const SizedBox(height: 16),
-            Text('Inputs',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            ResultCard(
-                label: 'A (binary)', value: _result!.inputA, icon: Icons.looks_one_outlined),
-            ResultCard(
-                label: 'A (decimal)', value: '${_result!.decimalA}', icon: Icons.looks_one_outlined),
-            ResultCard(
-                label: 'B (binary)', value: _result!.inputB, icon: Icons.looks_two_outlined),
-            ResultCard(
-                label: 'B (decimal)', value: '${_result!.decimalB}', icon: Icons.looks_two_outlined),
+            const SliverSectionHeader(title: 'Inputs'),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+                child: Column(
+                  children: [
+                    ResultCard(
+                      label: 'A (binary)',
+                      value: result.inputA,
+                      icon: Icons.looks_one_outlined,
+                    ),
+                    ResultCard(
+                      label: 'A (decimal)',
+                      value: '${result.decimalA}',
+                      icon: Icons.looks_one_outlined,
+                    ),
+                    ResultCard(
+                      label: 'B (binary)',
+                      value: result.inputB,
+                      icon: Icons.looks_two_outlined,
+                    ),
+                    ResultCard(
+                      label: 'B (decimal)',
+                      value: '${result.decimalB}',
+                      icon: Icons.looks_two_outlined,
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ],
       ),

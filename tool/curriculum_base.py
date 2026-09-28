@@ -13,6 +13,8 @@ REFERENCES = []
 
 _QID = [1]
 _OID = [1]
+CURRENT_SUBJECT = [0]
+QUESTION_MARK = [0]
 
 
 def dart_str(s):
@@ -21,11 +23,20 @@ def dart_str(s):
     return "'" + s.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n').replace('$', '\\$') + "'"
 
 
+def dart_text(v):
+    """Flatten list values into a single '; '-joined string for TEXT columns."""
+    if isinstance(v, list):
+        return dart_str('; '.join(str(x) for x in v))
+    return dart_str(v)
+
+
 def q(prompt, options, answers, explanation='', type_='multiple_choice'):
     qid = _QID[0]
     _QID[0] += 1
     QUIZ_QUESTIONS.append({
         'id': qid,
+        'subject_id': 0,
+        'lesson_id': 0,
         'question': prompt,
         'type': type_,
         'explanation': explanation,
@@ -66,6 +77,10 @@ def lesson(subject_id, order, title, concept, definition='', formula='',
             'title': t,
             'content': c,
         })
+    for _qq in QUIZ_QUESTIONS[QUESTION_MARK[0]:]:
+        _qq['subject_id'] = subject_id
+        _qq['lesson_id'] = lid
+    QUESTION_MARK[0] = len(QUIZ_QUESTIONS)
     return lid
 
 
@@ -92,6 +107,7 @@ SUBJECTS = []
 
 
 def subject(sid, name, category, description, icon):
+    CURRENT_SUBJECT[0] = sid
     SUBJECTS.append({
         'id': sid,
         'name': name,
@@ -105,6 +121,8 @@ def subject(sid, name, category, description, icon):
 
 def generate():
     lines = []
+    lines.append("library;")
+    lines.append("")
     lines.append("/// GENERATED FILE — DO NOT EDIT BY HAND.")
     lines.append("/// Regenerate with: python3 tool/generate_curriculum.py")
     lines.append("import 'package:sqflite/sqflite.dart';")
@@ -121,16 +139,14 @@ def generate():
         lines.append("  {")
         lines.append("    'subject_id': %d," % l['subject_id'])
         lines.append("    'order_index': %d," % l['order_index'])
-        lines.append("    'title': %s," % dart_str(l['title']))
-        lines.append("    'concept': %s," % dart_str(l['concept']))
-        lines.append("    'definition': %s," % dart_str(l['definition']))
-        lines.append("    'formula': %s," % dart_str(l['formula']))
-        lines.append("    'explanation': %s," % dart_str(l['explanation']))
-        lines.append("    'worked_example': %s," % dart_str(l['worked_example']))
-        lines.append("    'engineering_example': %s," % dart_str(l['engineering_example']))
-        lines.append("    'common_mistakes': %s," % dart_str(l['common_mistakes']))
-        pq = ', '.join(dart_str(p) for p in l['practice_questions'])
-        lines.append("    'practice_questions': [%s]," % pq)
+        lines.append("    'title': %s," % dart_text(l['title']))
+        lines.append("    'concept': %s," % dart_text(l['concept']))
+        lines.append("    'definition': %s," % dart_text(l['definition']))
+        lines.append("    'formula': %s," % dart_text(l['formula']))
+        lines.append("    'explanation': %s," % dart_text(l['explanation']))
+        lines.append("    'worked_example': %s," % dart_text(l['worked_example']))
+        lines.append("    'engineering_example': %s," % dart_text(l['engineering_example']))
+        lines.append("    'common_mistakes': %s," % dart_text(l['common_mistakes']))
         lines.append("  },")
     lines.append("];")
     lines.append("")
@@ -142,9 +158,9 @@ def generate():
     lines.append("")
     lines.append("const curriculumQuizQuestions = <Map<String, Object>>[")
     for qq in QUIZ_QUESTIONS:
-        lines.append("  {'id': %d, 'question': %s, 'type': %s, 'explanation': %s, 'correct_answers': %s},"
-                     % (qq['id'], dart_str(qq['question']), dart_str(qq['type']),
-                        dart_str(qq['explanation']), dart_str(qq['correct_answers'])))
+        lines.append("  {'id': %d, 'subject_id': %d, 'lesson_id': %d, 'question': %s, 'type': %s, 'explanation': %s, 'correct_answers': %s},"
+                     % (qq['id'], qq['subject_id'], qq['lesson_id'], dart_str(qq['question']),
+                        dart_str(qq['type']), dart_str(qq['explanation']), dart_str(qq['correct_answers'])))
     lines.append("];")
     lines.append("")
     lines.append("const curriculumQuizOptions = <Map<String, Object>>[")
@@ -156,39 +172,56 @@ def generate():
     lines.append("const curriculumFormulas = <Map<String, Object>>[")
     for f in FORMULAS:
         lines.append("  {'category': %s, 'name': %s, 'expression': %s, 'variables': %s, 'application': %s},"
-                     % (dart_str(f['category']), dart_str(f['name']), dart_str(f['expression']),
-                        dart_str(f['variables']), dart_str(f['application'])))
+                     % (dart_str(f['category']), dart_str(f['name']), dart_text(f['expression']),
+                        dart_text(f['variables']), dart_text(f['application'])))
     lines.append("];")
     lines.append("")
     lines.append("const curriculumProgrammingReferences = <Map<String, Object>>[")
     for r in REFERENCES:
         lines.append("  {'language': %s, 'topic': %s, 'title': %s, 'code': %s},"
-                     % (dart_str(r['language']), dart_str(r['topic']), dart_str(r['title']), dart_str(r['code'])))
+                     % (dart_str(r['language']), dart_str(r['topic']), dart_str(r['title']), dart_text(r['code'])))
     lines.append("];")
     lines.append("")
-    lines.append("Future<void> seedDatabase(Database db) async {")
-    lines.append("  final batch = db.batch();")
-    lines.append("  for (final s in curriculumSubjects) {")
-    lines.append("    batch.insert('subjects', s);")
+    lines.append("/// Seeds the bundled curriculum in bounded chunks.")
+    lines.append("///")
+    lines.append("/// A single 3.7k-row batch marshals every row across the platform")
+    lines.append("/// channel before any of it is written, which blocks the UI thread for")
+    lines.append("/// long enough to drop the first frames. Chunking plus an explicit yield")
+    lines.append("/// between chunks keeps the splash animating while the seed runs.")
+    lines.append("///")
+    lines.append("/// [onProgress] receives a 0..1 value so the UI can show real progress")
+    lines.append("/// instead of an indefinite spinner.")
+    lines.append("Future<void> seedDatabase(")
+    lines.append("  Database db, {")
+    lines.append("  void Function(double progress)? onProgress,")
+    lines.append("  int chunkSize = 200,")
+    lines.append("}) async {")
+    lines.append("  const tables = <String, List<Map<String, Object>>>{")
+    lines.append("    'subjects': curriculumSubjects,")
+    lines.append("    'lessons': curriculumLessons,")
+    lines.append("    'topics': curriculumTopics,")
+    lines.append("    'quiz_questions': curriculumQuizQuestions,")
+    lines.append("    'quiz_options': curriculumQuizOptions,")
+    lines.append("    'formulas': curriculumFormulas,")
+    lines.append("    'programming_references': curriculumProgrammingReferences,")
+    lines.append("  };")
+    lines.append("  final total = tables.values.fold<int>(0, (sum, rows) => sum + rows.length);")
+    lines.append("  var written = 0;")
+    lines.append("  for (final entry in tables.entries) {")
+    lines.append("    final rows = entry.value;")
+    lines.append("    for (var start = 0; start < rows.length; start += chunkSize) {")
+    lines.append("      final end =")
+    lines.append("          (start + chunkSize) < rows.length ? start + chunkSize : rows.length;")
+    lines.append("      final batch = db.batch();")
+    lines.append("      for (final row in rows.sublist(start, end)) {")
+    lines.append("        batch.insert(entry.key, row);")
+    lines.append("      }")
+    lines.append("      await batch.commit(noResult: true);")
+    lines.append("      written += end - start;")
+    lines.append("      onProgress?.call(total == 0 ? 1 : written / total);")
+    lines.append("      // Yield so the event loop can paint between chunks.")
+    lines.append("      await Future<void>.delayed(Duration.zero);")
+    lines.append("    }")
     lines.append("  }")
-    lines.append("  for (final l in curriculumLessons) {")
-    lines.append("    batch.insert('lessons', l);")
-    lines.append("  }")
-    lines.append("  for (final t in curriculumTopics) {")
-    lines.append("    batch.insert('topics', t);")
-    lines.append("  }")
-    lines.append("  for (final qq in curriculumQuizQuestions) {")
-    lines.append("    batch.insert('quiz_questions', qq);")
-    lines.append("  }")
-    lines.append("  for (final qo in curriculumQuizOptions) {")
-    lines.append("    batch.insert('quiz_options', qo);")
-    lines.append("  }")
-    lines.append("  for (final f in curriculumFormulas) {")
-    lines.append("    batch.insert('formulas', f);")
-    lines.append("  }")
-    lines.append("  for (final r in curriculumProgrammingReferences) {")
-    lines.append("    batch.insert('programming_references', r);")
-    lines.append("  }")
-    lines.append("  await batch.commit(noResult: true);")
     lines.append("}")
     return '\n'.join(lines) + '\n'

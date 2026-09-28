@@ -1,6 +1,9 @@
+import 'electronics_calculator_service.dart';
 import 'dart:math' as math;
 
 class PhysicsCalculatorService {
+  static const _electronics = ElectronicsCalculatorService();
+
   const PhysicsCalculatorService();
 
   double velocity(double distance, double time) {
@@ -52,18 +55,16 @@ class PhysicsCalculatorService {
     return speed / frequency;
   }
 
+  // Ohm's law lives in `ElectronicsCalculatorService`; these forward to it so
+  // the formula has exactly one implementation in the codebase.
   double ohmsLawVoltage(double current, double resistance) =>
-      current * resistance;
+      _electronics.ohmsLawVoltage(current, resistance);
 
-  double ohmsLawCurrent(double voltage, double resistance) {
-    if (resistance == 0) throw ArgumentError('Resistance cannot be zero');
-    return voltage / resistance;
-  }
+  double ohmsLawCurrent(double voltage, double resistance) =>
+      _electronics.ohmsLawCurrent(voltage, resistance);
 
-  double ohmsLawResistance(double voltage, double current) {
-    if (current == 0) throw ArgumentError('Current cannot be zero');
-    return voltage / current;
-  }
+  double ohmsLawResistance(double voltage, double current) =>
+      _electronics.ohmsLawResistance(voltage, current);
 
   double electricalPower({double? v, double? i, double? r}) {
     if (v != null && i != null) return v * i;

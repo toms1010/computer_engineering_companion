@@ -41,14 +41,14 @@ class Subject {
     'smart_toy': Icons.smart_toy_outlined,
   };
 
-  Subject copyWith({int? completedLessons}) => Subject(
+  Subject copyWith({int? completedLessons, int? totalLessons}) => Subject(
         id: id,
         name: name,
         category: category,
         description: description,
         icon: icon,
         completedLessons: completedLessons ?? this.completedLessons,
-        totalLessons: totalLessons,
+        totalLessons: totalLessons ?? this.totalLessons,
       );
 
   factory Subject.fromMap(Map<String, Object?> m) => Subject(
@@ -160,6 +160,48 @@ enum QuizType {
   static QuizType fromLabel(String label) =>
       QuizType.values.firstWhere((t) => t.label == label,
           orElse: () => QuizType.multipleChoice);
+}
+
+/// The five ways a quiz can be assembled.
+///
+/// Lives in the domain layer so the router can reference a mode without
+/// importing a screen.
+enum QuizMode {
+  /// Five random questions from the whole bank.
+  quick('quick', 'Quick quiz'),
+
+  /// Every question for one subject.
+  subject('subject', 'Subject quiz'),
+
+  /// Every question for one lesson.
+  lesson('lesson', 'Lesson quiz'),
+
+  /// Ten random questions, untimed style but scored as an exam.
+  exam('exam', 'Exam'),
+
+  /// Questions the user has previously got wrong.
+  mistakes('mistakes', 'Review mistakes');
+
+  const QuizMode(this.label, this.title);
+
+  final String label;
+  final String title;
+
+  static QuizMode fromLabel(String label) => QuizMode.values.firstWhere(
+        (m) => m.label == label,
+        orElse: () => QuizMode.quick,
+      );
+
+  /// How many questions this mode draws, or null for "all that match".
+  int? get questionLimit => switch (this) {
+        QuizMode.quick => 5,
+        QuizMode.exam => 10,
+        QuizMode.mistakes => 20,
+        QuizMode.subject || QuizMode.lesson => null,
+      };
+
+  /// Whether the mode draws questions at random rather than using all of them.
+  bool get isRandomised => this == QuizMode.quick || this == QuizMode.exam;
 }
 
 class QuizQuestion {

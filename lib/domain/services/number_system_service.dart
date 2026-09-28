@@ -41,7 +41,7 @@ class NumberSystemService {
   }
 
   String fromDecimal(int value, NumberBase base) {
-    if (value < 0) return '-' + fromDecimal(-value, base);
+    if (value < 0) return '-${fromDecimal(-value, base)}';
     return value.toRadixString(base.radix).toUpperCase();
   }
 
@@ -130,7 +130,7 @@ class BinaryCalculatorService {
   }
 
   String toBinary(int value) {
-    if (value < 0) return '-' + (-value).toRadixString(2);
+    if (value < 0) return '-${(-value).toRadixString(2)}';
     return value.toRadixString(2);
   }
 

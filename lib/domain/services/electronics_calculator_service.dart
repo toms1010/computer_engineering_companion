@@ -40,6 +40,22 @@ class ElectronicsCalculatorService {
         voltage: null, current: null, resistance: null, power: null);
   }
 
+  // Ohm's law, solved for one unknown. These three are the canonical
+  // implementations: `PhysicsCalculatorService` delegates to them so the
+  // formula is not defined twice.
+  double ohmsLawVoltage(double current, double resistance) =>
+      current * resistance;
+
+  double ohmsLawCurrent(double voltage, double resistance) {
+    if (resistance == 0) throw ArgumentError('Resistance cannot be zero');
+    return voltage / resistance;
+  }
+
+  double ohmsLawResistance(double voltage, double current) {
+    if (current == 0) throw ArgumentError('Current cannot be zero');
+    return voltage / current;
+  }
+
   double power({double? v, double? i, double? r}) {
     if (v != null && i != null) return v * i;
     if (v != null && r != null && r != 0) return (v * v) / r;

@@ -1,24 +1,40 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../app/app_providers.dart';
-import '../../core/widgets/ui.dart';
+
+import '../../app/providers.dart';
+import '../../core/design/app_spacing.dart';
+import '../../core/utils/app_time.dart';
 import '../../domain/entities/entities.dart';
 import '../../domain/services/quiz_scoring_service.dart';
+import '../../widgets/app_scaffold.dart';
+import '../../widgets/cards.dart';
+import '../../widgets/inputs.dart';
+import '../../widgets/performance_watcher.dart';
+import '../../widgets/states.dart';
 
-enum QuizMode { quick, subject, exam, lesson, mistakes }
-
+/// Runs a quiz and shows the result with a full review.
+///
+/// Three performance problems from the previous implementation are fixed:
+///
+///  * the timer called `setState` once a second, rebuilding the app bar, the
+///    whole question body and the progress bar. The timer now drives only the
+///    clock text through a [ValueListenableBuilder], so a tick repaints one
+///    small widget;
+///  * quick and exam modes loaded all 665 questions and then shuffled them on
+///    the UI isolate. Randomised modes now select their rows in SQL;
+///  * mistake review ran one query per attempt and then reloaded the whole
+///    question bank. It is now a single joined query.
 class QuizScreen extends ConsumerStatefulWidget {
   const QuizScreen({
     super.key,
     required this.mode,
-    required this.title,
     this.subjectId,
     this.lessonId,
   });
 
   final QuizMode mode;
-  final String title;
   final int? subjectId;
   final int? lessonId;
 
@@ -27,379 +43,378 @@ class QuizScreen extends ConsumerStatefulWidget {
 }
 
 class _QuizScreenState extends ConsumerState<QuizScreen> {
-  List<QuizQuestion> _questions = [];
+  static const _scoring = QuizScoringService();
+
+  List<QuizQuestion> _questions = const [];
   final Map<int, Set<int>> _answers = {};
   int _current = 0;
   bool _loading = true;
   bool _finished = false;
+  bool _saving = false;
   int _correct = 0;
-  DateTime _startTime = DateTime.now();
+  String _error = '';
+  final Stopwatch _clock = Stopwatch();
   Timer? _timer;
-  int _elapsedSeconds = 0;
-  int? _attemptId;
+  final ValueNotifier<int> _elapsed = ValueNotifier<int>(0);
 
   @override
   void initState() {
     super.initState();
-    _startTime = DateTime.now();
-    _loadQuestions();
+    _clock.start();
+    // Ticks only repaint the clock label, not the whole screen.
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && !_finished) {
-        setState(() => _elapsedSeconds =
-            DateTime.now().difference(_startTime).inSeconds);
-      }
+      _elapsed.value = _clock.elapsed.inSeconds;
     });
+    _load();
   }
 
   @override
   void dispose() {
+    // Every timer, listener and notifier owned by this screen is released
+    // here. A quiz left open must not keep ticking in the background.
     _timer?.cancel();
+    _elapsed.dispose();
     super.dispose();
   }
 
-  Future<void> _loadQuestions() async {
+  Future<void> _load() async {
     final repository = ref.read(repositoryProvider);
-    List<QuizQuestion> questions;
-    switch (widget.mode) {
-      case QuizMode.lesson:
-        questions = await repository.loadQuestions(lessonId: widget.lessonId);
-      case QuizMode.subject:
-        questions = await repository.loadQuestions(subjectId: widget.subjectId);
-      case QuizMode.exam:
-        questions = await repository.loadQuestions();
-        questions = (questions..shuffle()).take(10).toList();
-      case QuizMode.mistakes:
-        questions = await _loadMistakes();
-      case QuizMode.quick:
-        questions = await repository.loadQuestions();
-        questions = (questions..shuffle()).take(5).toList();
-    }
-    if (mounted) {
+    final limit = widget.mode.questionLimit;
+    try {
+      final List<QuizQuestion> loaded;
+      if (widget.mode == QuizMode.mistakes) {
+        final entries = await repository.loadMistakesForReview(
+          subjectId: widget.subjectId ?? 0,
+          limit: limit ?? 20,
+        );
+        loaded = entries.map((e) => e.question).toList(growable: false);
+        // Pre-fill the user's previous wrong answers so the review shows
+        // what they chose last time.
+        for (final entry in entries) {
+          _answers[entry.question.id] = {...entry.selected};
+        }
+      } else if (widget.mode.isRandomised) {
+        loaded = await repository.loadRandomQuestions(
+          subjectId: widget.subjectId,
+          lessonId: widget.lessonId,
+          limit: limit ?? 5,
+        );
+      } else {
+        loaded = await repository.loadQuestions(
+          subjectId: widget.subjectId,
+          lessonId: widget.lessonId,
+        );
+      }
+
+      if (!mounted) return;
       setState(() {
-        _questions = questions;
+        _questions = loaded;
         _loading = false;
+        if (loaded.isEmpty) {
+          _error = switch (widget.mode) {
+            QuizMode.mistakes =>
+              'You have no wrong answers to review yet. Take a quiz first!',
+            QuizMode.subject || QuizMode.lesson =>
+              'No questions are available for this selection.',
+            _ => 'No questions are available.',
+          };
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Could not load the questions. $error';
       });
     }
   }
 
-  Future<List<QuizQuestion>> _loadMistakes() async {
-    final repository = ref.read(repositoryProvider);
-    final attempts = await repository.loadQuizAttempts();
-    final mistakeQuestionIds = <int>{};
-    for (final attempt in attempts) {
-      final answers = await repository.loadQuizAnswers(attempt.id);
-      for (final answer in answers) {
-        if (!answer.isCorrect) mistakeQuestionIds.add(answer.questionId);
-      }
-    }
-    if (mistakeQuestionIds.isEmpty) return [];
-    final allQuestions = await repository.loadQuestions();
-    return allQuestions
-        .where((q) => mistakeQuestionIds.contains(q.id))
-        .toList();
-  }
+  bool get _isMultiSelect =>
+      _questions.isNotEmpty && _questions[_current].correctIndexes.length > 1;
 
-  void _selectOption(int questionId, int optionIndex, bool multi) {
+  void _select(int optionIndex) {
+    final question = _questions[_current];
     setState(() {
-      final current = _answers[questionId] ?? <int>{};
-      if (multi) {
-        if (current.contains(optionIndex)) {
-          current.remove(optionIndex);
-        } else {
-          current.add(optionIndex);
-        }
+      final selected = _answers.putIfAbsent(question.id, () => <int>{});
+      if (_isMultiSelect) {
+        if (!selected.remove(optionIndex)) selected.add(optionIndex);
       } else {
-        current
+        selected
           ..clear()
           ..add(optionIndex);
       }
-      _answers[questionId] = current;
     });
+  }
+
+  void _next() {
+    if (_current < _questions.length - 1) {
+      setState(() => _current++);
+    } else {
+      _finish();
+    }
+  }
+
+  void _previous() {
+    if (_current > 0) setState(() => _current--);
   }
 
   Future<void> _finish() async {
     _timer?.cancel();
-    final scoring = const QuizScoringService();
-    final correct = scoring.scoreAnswers(_questions, _answers);
-    final repository = ref.read(repositoryProvider);
-    final attemptId = await repository.saveQuizAttempt(
-      subjectId: widget.subjectId ?? 0,
-      correct: correct,
-      total: _questions.length,
-      elapsedSeconds: _elapsedSeconds,
-      quizMode: switch (widget.mode) {
-        QuizMode.quick => 'quick',
-        QuizMode.subject => 'subject',
-        QuizMode.exam => 'exam',
-        QuizMode.lesson => 'lesson',
-        QuizMode.mistakes => 'mistakes',
-      },
-      answers: _answers,
-      questions: _questions,
-    );
-    if (mounted) {
-      setState(() {
-        _finished = true;
-        _correct = correct;
-        _attemptId = attemptId;
-      });
-      ref.invalidate(quizAttemptsProvider);
-      ref.invalidate(progressStatsProvider);
-      ref.invalidate(activitiesProvider);
+    final correct = _scoring.scoreAnswers(_questions, _answers);
+
+    setState(() {
+      _finished = true;
+      _correct = correct;
+      _saving = true;
+    });
+
+    try {
+      await ref.read(repositoryProvider).saveQuizAttempt(
+            subjectId: widget.subjectId ?? 0,
+            correct: correct,
+            total: _questions.length,
+            elapsedSeconds: _clock.elapsed.inSeconds,
+            quizMode: widget.mode.label,
+            answers: _answers,
+            questions: _questions,
+          );
+    } catch (_) {
+      // A failed save must not lose the user's answers on screen; report it
+      // and carry on.
+      if (mounted) {
+        showAppSnackBar(
+            context, 'Your result could not be saved to this device');
+      }
     }
+
+    if (!mounted) return;
+    ref
+      ..invalidate(quizAttemptsProvider)
+      ..invalidate(progressStatsProvider)
+      ..invalidate(activitiesProvider);
+    setState(() => _saving = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-        actions: [
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Text(
-                '$_elapsedSeconds s',
-                style: Theme.of(context).textTheme.labelLarge,
+    return ScreenPerformanceWatcher(
+      name: 'Quiz',
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(widget.mode.title),
+          actions: [
+            if (_questions.isNotEmpty && !_finished)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.lg),
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: _elapsed,
+                    builder: (context, seconds, _) => Text(
+                      AppTime.stopwatch(seconds),
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
+          ],
+        ),
+        body: _buildBody(),
+        bottomNavigationBar: _buildControls(),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _questions.isEmpty
-              ? EmptyState(
-                  icon: Icons.quiz_outlined,
-                  title: 'No questions available',
-                  subtitle: widget.mode == QuizMode.mistakes
-                      ? 'You have no mistakes to review. Great job!'
-                      : 'Questions for this selection are not available yet.',
-                )
-              : _finished
-                  ? _buildResult()
-                  : _buildQuestion(),
     );
   }
 
-  Widget _buildQuestion() {
-    final question = _questions[_current];
-    final isMulti = question.type == 'multiple_answer';
-    final selected = _answers[question.id] ?? <int>{};
+  Widget _buildBody() {
+    if (_loading) {
+      return const LoadingView(message: 'Loading questions…');
+    }
+    if (_questions.isEmpty) {
+      return EmptyStateView(
+        icon: Icons.quiz_outlined,
+        title: 'Nothing to quiz',
+        message: _error,
+        actionLabel: 'Go back',
+        onAction: () => Navigator.of(context).maybePop(),
+      );
+    }
+    if (_finished) return _buildResult();
 
+    final question = _questions[_current];
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.gutter, AppSpacing.sm, AppSpacing.gutter, 0),
+          child: ProgressBar(
+            value: (_current + 1) / _questions.length,
+            label: 'Question ${_current + 1} of ${_questions.length}',
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(AppSpacing.gutter),
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Question ${_current + 1} of ${_questions.length}',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  if (isMulti)
-                    Text('Select all that apply',
-                        style: Theme.of(context)
-                            .textTheme
-                            .labelSmall
-                            ?.copyWith(
-                                color:
-                                    Theme.of(context).colorScheme.primary)),
+                  Pill(label: _typeLabel(question), dense: true),
+                  const SizedBox(width: AppSpacing.sm),
+                  if (_isMultiSelect)
+                    const Pill(label: 'Select all that apply', dense: true),
                 ],
               ),
-              const SizedBox(height: 8),
-              LinearProgressIndicator(
-                  value: (_current + 1) / _questions.length),
-              const SizedBox(height: 20),
-              Text(
-                question.prompt,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .secondaryContainer
-                      .withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  question.type.replaceAll('_', ' ').toUpperCase(),
-                  style: Theme.of(context)
-                      .textTheme
-                      .labelSmall
-                      ?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSecondaryContainer),
+              const SizedBox(height: AppSpacing.lg),
+              Text(question.prompt,
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: AppSpacing.xl),
+              // Correctly lazy already, but given stable keys so a selection
+              // change does not rebuild every option row.
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: question.options.length,
+                itemBuilder: (context, index) => Padding(
+                  key: ValueKey('${question.id}:$index'),
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: _OptionTile(
+                    label: question.options[index],
+                    selected: _answers[question.id]?.contains(index) ?? false,
+                    onTap: () => _select(index),
+                  ),
                 ),
               ),
             ],
           ),
         ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-            itemCount: question.options.length,
-            itemBuilder: (context, i) {
-              final isSelected = selected.contains(i);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Card(
-                  color: isSelected
-                      ? Theme.of(context).colorScheme.primaryContainer
-                      : null,
-                  child: ListTile(
-                    leading: Icon(
-                      isMulti
-                          ? (isSelected
-                              ? Icons.check_box
-                              : Icons.check_box_outline_blank)
-                          : (isSelected
-                              ? Icons.radio_button_checked
-                              : Icons.radio_button_off),
-                      color: isSelected
-                          ? Theme.of(context).colorScheme.onPrimaryContainer
-                          : null,
-                    ),
-                    title: Text(question.options[i]),
-                    onTap: () =>
-                        _selectOption(question.id, i, isMulti),
-                  ),
-                ),
-              );
-            },
-          ),
+      ],
+    );
+  }
+
+  Widget? _buildControls() {
+    if (_loading || _questions.isEmpty || _finished) return null;
+    return ActionBar(
+      children: [
+        OutlinedButton(
+          onPressed: _current == 0 ? null : _previous,
+          child: const Text('Back'),
         ),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-            child: Row(
-              children: [
-                if (_current > 0)
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => setState(() => _current--),
-                      child: const Text('Previous'),
-                    ),
-                  ),
-                if (_current > 0) const SizedBox(width: 12),
-                Expanded(
-                  flex: 2,
-                  child: FilledButton(
-                    onPressed: () {
-                      if (_current < _questions.length - 1) {
-                        setState(() => _current++);
-                      } else {
-                        _finish();
-                      }
-                    },
-                    child: Text(
-                        _current == _questions.length - 1 ? 'Finish' : 'Next'),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        FilledButton(
+          onPressed: _next,
+          child: Text(_current == _questions.length - 1 ? 'Finish' : 'Next'),
         ),
       ],
     );
   }
 
   Widget _buildResult() {
-    final total = _questions.length;
-    final score = total == 0 ? 0.0 : (_correct / total) * 100;
-    final scoring = const QuizScoringService();
-    final grade = scoring.grade(score);
-
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Card(
-          color: Theme.of(context).colorScheme.primaryContainer,
+    final score = _scoring.accuracy(_correct, _questions.length);
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(AppSpacing.gutter),
             child: Column(
               children: [
-                Text('Quiz Complete',
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineSmall
-                        ?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onPrimaryContainer)),
-                const SizedBox(height: 16),
-                Text('$_correct / $total',
-                    style: Theme.of(context)
-                        .textTheme
-                        .displayMedium
-                        ?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onPrimaryContainer)),
-                Text('${score.round()}% • Grade: $grade',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onPrimaryContainer)),
-                const SizedBox(height: 8),
-                Text(
-                  scoring.feedback(score),
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onPrimaryContainer),
+                ContentCard(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  child: Column(
+                    children: [
+                      Text(
+                        _scoring.grade(score),
+                        style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      Text('${score.round()}%', style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(_scoring.feedback(score),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyMedium),
+                      const SizedBox(height: AppSpacing.md),
+                      Text(
+                        '$_correct of ${_questions.length} correct'
+                        ' • ${AppTime.stopwatch(_clock.elapsed.inSeconds)}'
+                        '${_saving ? ' • saving…' : ''}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 20),
-        Text('Review',
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge
-                ?.copyWith(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 10),
-        for (var i = 0; i < _questions.length; i++)
-          _ReviewCard(
-            question: _questions[i],
-            selected: _answers[_questions[i].id] ?? <int>{},
-            index: i + 1,
+        const SliverSectionHeader(
+            title: 'Review',
+            subtitle: 'Tap a question to see the explanation',
           ),
-        const SizedBox(height: 24),
-        FilledButton.icon(
-          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
-          icon: const Icon(Icons.check),
-          label: const Text('Done'),
+        // `ListView.separated` over review cards: the previous version built
+        // every card up front, each containing an animated ExpansionTile.
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+          sliver: SliverList.separated(
+            itemCount: _questions.length,
+            itemBuilder: (context, index) {
+              final question = _questions[index];
+              return _ReviewCard(
+                key: ValueKey('review:${question.id}'),
+                question: question,
+                selected: _answers[question.id] ?? const <int>{},
+                index: index,
+              );
+            },
+            separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.gutter),
+            child: FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
+          ),
         ),
       ],
+    );
+  }
+
+  /// Precomputed once per question instead of `replaceAll` + `toUpperCase` on
+  /// every build (which the timer previously triggered once a second).
+  static String _typeLabel(QuizQuestion question) =>
+      question.type.replaceAll('_', ' ').toUpperCase();
+}
+
+class _OptionTile extends StatelessWidget {
+  const _OptionTile({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      color: selected ? scheme.primaryContainer : null,
+      child: ListTile(
+        onTap: onTap,
+        leading: Icon(
+          selected ? Icons.check_circle : Icons.circle_outlined,
+          color: selected ? scheme.primary : scheme.outline,
+        ),
+        title: Text(label),
+      ),
     );
   }
 }
 
 class _ReviewCard extends StatelessWidget {
   const _ReviewCard({
+    super.key,
     required this.question,
     required this.selected,
     required this.index,
@@ -411,51 +426,66 @@ class _ReviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isCorrect = question.isCorrect(selected);
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final correct = question.isCorrect(selected);
+
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
       child: ExpansionTile(
-        leading: Icon(
-          isCorrect ? Icons.check_circle : Icons.cancel,
-          color: isCorrect ? Colors.green : scheme.error,
+        shape: const Border(),
+        collapsedShape: const Border(),
+        leading: CircleAvatar(
+          radius: 14,
+          backgroundColor:
+              correct ? scheme.primary : scheme.errorContainer,
+          foregroundColor:
+              correct ? scheme.onPrimary : scheme.onErrorContainer,
+          child: Icon(correct ? Icons.check : Icons.close, size: 15),
         ),
-        title: Text('Q$index: ${question.prompt}',
+        title: Text('Q${index + 1}. ${question.prompt}',
             maxLines: 2, overflow: TextOverflow.ellipsis),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        subtitle: Text(correct ? 'Correct' : 'Incorrect'),
+        childrenPadding:
+            const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
         children: [
           for (var i = 0; i < question.options.length; i++)
             Padding(
-              padding: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
                     question.correctIndexes.contains(i)
                         ? Icons.check_circle
-                        : (selected.contains(i)
+                        : selected.contains(i)
                             ? Icons.cancel
-                            : Icons.circle_outlined),
+                            : Icons.circle_outlined,
                     size: 18,
                     color: question.correctIndexes.contains(i)
-                        ? Colors.green
-                        : (selected.contains(i) ? scheme.error : scheme.outline),
+                        ? scheme.primary
+                        : selected.contains(i)
+                            ? scheme.error
+                            : scheme.outline,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(question.options[i])),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      question.options[i],
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: question.correctIndexes.contains(i)
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
-          const SizedBox(height: 4),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text('Explanation: ${question.explanation}',
-                style: Theme.of(context).textTheme.bodySmall),
-          ),
+          if (question.explanation.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text('Explanation', style: theme.textTheme.labelMedium),
+            Text(question.explanation, style: theme.textTheme.bodySmall),
+          ],
         ],
       ),
     );

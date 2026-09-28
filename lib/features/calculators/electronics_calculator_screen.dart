@@ -1,811 +1,280 @@
 import 'package:flutter/material.dart';
-import '../../core/widgets/ui.dart';
-import '../../domain/services/electronics_calculator_service.dart';
 
+import '../../core/error/app_exception.dart';
+import '../../domain/services/electronics_calculator_service.dart';
+import '../../widgets/calculator.dart';
+
+/// Electronics calculators: Ohm's law, series and parallel networks, RC
+/// circuits and LED resistors.
+///
+/// Eight near-identical screens collapse into a static table of
+/// [CalculatorEntry] values feeding the shared [CalculatorScreen]. The
+/// arithmetic still lives in [ElectronicsCalculatorService], which is
+/// unchanged and still unit-tested directly.
 class ElectronicsCalculatorScreen extends StatelessWidget {
   const ElectronicsCalculatorScreen({super.key, this.initial});
+
+  /// Optional entry id to open immediately, used by the Home quick tool.
   final String? initial;
 
+  /// The whole catalogue as data. `const` so nothing is rebuilt per frame.
+  static const _entries = <CalculatorEntry>[
+    CalculatorEntry(
+      title: "Ohm's law",
+      formula: 'V = I × R',
+      icon: Icons.bolt_outlined,
+      fields: [
+        CalculatorField(label: 'Voltage (V)'),
+        CalculatorField(label: 'Current (A)'),
+        CalculatorField(label: 'Resistance (Ω)'),
+      ],
+      compute: _ohmsLaw,
+    ),
+    CalculatorEntry(
+      title: 'Series resistance',
+      formula: 'Rtotal = R₁ + R₂ + R₃',
+      icon: Icons.add_circle_outline,
+      fields: [
+        CalculatorField(label: 'R1 (Ω)'),
+        CalculatorField(label: 'R2 (Ω)'),
+        CalculatorField(label: 'R3 (Ω)'),
+      ],
+      compute: _series,
+    ),
+    CalculatorEntry(
+      title: 'Parallel resistance',
+      formula: '1/Rtotal = 1/R₁ + 1/R₂ + 1/R₃',
+      icon: Icons.account_tree_outlined,
+      fields: [
+        CalculatorField(label: 'R1 (Ω)'),
+        CalculatorField(label: 'R2 (Ω)'),
+        CalculatorField(label: 'R3 (Ω)'),
+      ],
+      compute: _parallel,
+    ),
+    CalculatorEntry(
+      title: 'Voltage divider',
+      formula: 'Vout = Vin × R2 / (R1 + R2)',
+      icon: Icons.vertical_align_center,
+      fields: [
+        CalculatorField(label: 'Input voltage (V)'),
+        CalculatorField(label: 'R1 (Ω)'),
+        CalculatorField(label: 'R2 (Ω)'),
+      ],
+      compute: _voltageDivider,
+    ),
+    CalculatorEntry(
+      title: 'Current divider',
+      formula: 'I₁ = Itotal × R₂ / (R₁ + R₂)',
+      icon: Icons.electric_bolt,
+      fields: [
+        CalculatorField(label: 'Total current (A)'),
+        CalculatorField(label: 'R1 (Ω)'),
+        CalculatorField(label: 'R2 (Ω)'),
+      ],
+      compute: _currentDivider,
+    ),
+    CalculatorEntry(
+      title: 'LED resistor',
+      formula: 'R = (Vsupply − Vf) / If',
+      icon: Icons.electrical_services,
+      fields: [
+        CalculatorField(label: 'Supply voltage (V)'),
+        CalculatorField(label: 'Forward voltage (V)'),
+        CalculatorField(label: 'Forward current (mA)'),
+      ],
+      compute: _led,
+    ),
+    CalculatorEntry(
+      title: 'RC time constant',
+      formula: 'τ = R × C,  fc = 1 / (2πRC)',
+      icon: Icons.timer_outlined,
+      fields: [
+        CalculatorField(label: 'Resistance (Ω)'),
+        // A capacitor value is legitimately positive; the sign is not.
+        CalculatorField(label: 'Capacitance (F)'),
+      ],
+      compute: _rc,
+    ),
+    CalculatorEntry(
+      title: 'Resistance colour bands',
+      formula: 'Ohms → band colours',
+      icon: Icons.palette_outlined,
+      fields: [CalculatorField(label: 'Resistance (Ω)')],
+      compute: _bands,
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Electronics Calculators')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Card(
-            color: Theme.of(context).colorScheme.secondaryContainer,
-            child: const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Educational calculators for DC circuit analysis. Enter known values and solve for the unknown.',
-                style: TextStyle(fontSize: 14),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          _CalcItem(
-            'Ohm\'s Law',
-            Icons.bolt_outlined,
-            'V = IR — solve for any variable',
-            () => _push(context, const _OhmsLawCalculator()),
-          ),
-          _CalcItem(
-            'Power',
-            Icons.power_outlined,
-            'P = VI = I²R = V²/R',
-            () => _push(context, const _PowerCalculator()),
-          ),
-          _CalcItem(
-            'Voltage Divider',
-            Icons.linear_scale_outlined,
-            'Vout = Vin × R2/(R1+R2)',
-            () => _push(context, const _VoltageDividerCalculator()),
-          ),
-          _CalcItem(
-            'Current Divider',
-            Icons.call_split_outlined,
-            'Current splits among parallel branches',
-            () => _push(context, const _CurrentDividerCalculator()),
-          ),
-          _CalcItem(
-            'LED Resistor',
-            Icons.lightbulb_outline,
-            'R = (Vsupply − Vf) / If',
-            () => _push(context, const _LedResistorCalculator()),
-          ),
-          _CalcItem(
-            'Series Resistance',
-            Icons.add_circle_outline,
-            'Rtotal = R1 + R2 + ...',
-            () => _push(context, const _SeriesResistanceCalculator()),
-          ),
-          _CalcItem(
-            'Parallel Resistance',
-            Icons.account_tree_outlined,
-            '1/Rtotal = 1/R1 + 1/R2 + ...',
-            () => _push(context, const _ParallelResistanceCalculator()),
-          ),
-          _CalcItem(
-            'RC Time Constant',
-            Icons.timer_outlined,
-            'τ = RC — charging and filtering',
-            () => _push(context, const _RcCalculator()),
-          ),
-          _CalcItem(
-            'Resistance Converter',
-            Icons.straighten_outlined,
-            'Color code to resistance value',
-            () => _push(context, const _ResistanceConverterCalculator()),
-          ),
-        ],
-      ),
+    if (initial != null) {
+      final match = _entries
+          .where((e) => e.title.toLowerCase().contains(initial!.toLowerCase()))
+          .firstOrNull;
+      if (match != null) {
+        return CalculatorScreen(
+          title: match.title,
+          formula: match.formula,
+          fields: match.fields,
+          compute: match.compute,
+        );
+      }
+    }
+    return CalculatorIndexScreen(
+      title: 'Electronics',
+      description:
+          'Solve for the unknown from any two known values. Every result is '
+          'computed on this device.',
+      entries: _entries,
     );
-  }
-
-  static void _push(BuildContext context, Widget screen) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
   }
 }
 
-class _CalcItem extends StatelessWidget {
-  const _CalcItem(this.title, this.icon, this.subtitle, this.onTap);
-  final String title, subtitle;
-  final IconData icon;
-  final VoidCallback onTap;
+/// Shared, stateless service instance. `const`, so there is nothing to
+/// allocate and nothing to dispose.
+const _service = ElectronicsCalculatorService();
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Card(
-        child: ListTile(
-          leading: CircleAvatar(
-            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-            child: Icon(icon,
-                color: Theme.of(context).colorScheme.onPrimaryContainer),
-          ),
-          title: Text(title,
-              style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text(subtitle),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: onTap,
-        ),
-      ),
-    );
+// ---------------------------------------------------------------------------
+// Computations. Pure functions over the parsed inputs, so they are trivially
+// unit-testable and contain no widget concerns.
+// ---------------------------------------------------------------------------
+
+List<CalculatorResult> _ohmsLaw(Map<String, double> input) {
+  final v = input['Voltage (V)'];
+  final i = input['Current (A)'];
+  final r = input['Resistance (Ω)'];
+  final filled = [v, i, r].where((x) => x != null).length;
+  if (filled != 2) {
+    throw const ValidationException(
+        'Enter exactly two of voltage, current and resistance.');
   }
+  if (r != null && r == 0) {
+    throw const ValidationException('Resistance cannot be zero.');
+  }
+  return [
+    if (v == null)
+      CalculatorResult(
+        label: 'Voltage',
+        value: _service.ohmsLawVoltage(i!, r!).toStringAsFixed(3),
+        unit: 'V',
+        icon: Icons.bolt_outlined,
+      ),
+    if (i == null)
+      CalculatorResult(
+        label: 'Current',
+        value: _service.ohmsLawCurrent(v!, r!).toStringAsFixed(4),
+        unit: 'A',
+        icon: Icons.electric_bolt,
+      ),
+    if (r == null)
+      CalculatorResult(
+        label: 'Resistance',
+        value: _service.ohmsLawResistance(v!, i!).toStringAsFixed(3),
+        unit: 'Ω',
+        icon: Icons.tag,
+      ),
+  ];
 }
 
-Widget _buildResultSection(BuildContext context, List<Widget> cards) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const SizedBox(height: 16),
-      Text('Results',
-          style: Theme.of(context)
-              .textTheme
-              .titleLarge
-              ?.copyWith(fontWeight: FontWeight.w800)),
-      const SizedBox(height: 10),
-      ...cards,
-    ],
+List<CalculatorResult> _series(Map<String, double> input) => [
+      CalculatorResult(
+        label: 'Total resistance',
+        value: _service
+            .seriesResistance([input['R1 (Ω)']!, input['R2 (Ω)']!, input['R3 (Ω)']!])
+            .toStringAsFixed(3),
+        unit: 'Ω',
+        icon: Icons.add_circle_outline,
+      ),
+    ];
+
+List<CalculatorResult> _parallel(Map<String, double> input) => [
+      CalculatorResult(
+        label: 'Total resistance',
+        value: _service
+            .parallelResistance(
+                [input['R1 (Ω)']!, input['R2 (Ω)']!, input['R3 (Ω)']!])
+            .toStringAsFixed(3),
+        unit: 'Ω',
+        icon: Icons.account_tree_outlined,
+      ),
+    ];
+
+List<CalculatorResult> _voltageDivider(Map<String, double> input) => [
+      CalculatorResult(
+        label: 'Output voltage',
+        value: _service
+            .voltageDivider(input['Input voltage (V)']!, input['R1 (Ω)']!,
+                input['R2 (Ω)']!)
+            .toStringAsFixed(3),
+        unit: 'V',
+        icon: Icons.bolt_outlined,
+      ),
+    ];
+
+List<CalculatorResult> _currentDivider(Map<String, double> input) {
+  final total = input['Total current (A)']!;
+  final r1 = input['R1 (Ω)']!;
+  final r2 = input['R2 (Ω)']!;
+  return [
+    CalculatorResult(
+      label: 'Current through R1',
+      value: _service.currentDivider(total, r1, r2).toStringAsFixed(4),
+      unit: 'A',
+      icon: Icons.electric_bolt,
+    ),
+    CalculatorResult(
+      label: 'Current through R2',
+      value: _service.currentDivider(total, r2, r1).toStringAsFixed(4),
+      unit: 'A',
+      icon: Icons.electric_bolt,
+    ),
+  ];
+}
+
+List<CalculatorResult> _led(Map<String, double> input) {
+  final value = _service.ledResistor(
+    input['Supply voltage (V)']!,
+    input['Forward voltage (V)']!,
+    input['Forward current (mA)']!,
   );
+  return [
+    CalculatorResult(
+      label: 'Resistor value',
+      value: '${value.round()}',
+      unit: 'Ω',
+      note: 'Use the nearest standard value.',
+      icon: Icons.electrical_services,
+    ),
+  ];
 }
 
-class _OhmsLawCalculator extends StatefulWidget {
-  const _OhmsLawCalculator();
-  @override
-  State<_OhmsLawCalculator> createState() => _OhmsLawCalculatorState();
+List<CalculatorResult> _rc(Map<String, double> input) {
+  final r = input['Resistance (Ω)']!;
+  final c = input['Capacitance (F)']!;
+  return [
+    CalculatorResult(
+      label: 'Time constant (τ)',
+      value: _service.rcTimeConstant(r, c).toStringAsFixed(6),
+      unit: 's',
+      icon: Icons.timer_outlined,
+    ),
+    CalculatorResult(
+      label: 'Cutoff frequency (fc)',
+      value: _service.rcCutoffFrequency(r, c).toStringAsFixed(3),
+      unit: 'Hz',
+      icon: Icons.graphic_eq,
+    ),
+  ];
 }
 
-class _OhmsLawCalculatorState extends State<_OhmsLawCalculator> {
-  final _v = TextEditingController();
-  final _i = TextEditingController();
-  final _r = TextEditingController();
-  OhmsLawResult? _result;
-  String? _error;
-  final _service = const ElectronicsCalculatorService();
-
-  @override
-  void dispose() {
-    _v.dispose();
-    _i.dispose();
-    _r.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final v = double.tryParse(_v.text);
-    final i = double.tryParse(_i.text);
-    final r = double.tryParse(_r.text);
-    final filled = [v != null, i != null, r != null].where((x) => x).length;
-    if (filled != 2) {
-      setState(() {
-        _error = 'Enter exactly two values';
-        _result = null;
-      });
-      return;
-    }
-    final result = _service.ohmsLaw(v: v, i: i, r: r);
-    if (result.voltage == null) {
-      setState(() {
-        _error = 'Cannot solve: current cannot be zero';
-        _result = null;
-      });
-      return;
-    }
-    setState(() {
-      _result = result;
-      _error = null;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Ohm\'s Law')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const FormulaBlock('V = I × R'),
-          const SizedBox(height: 16),
-          TextField(controller: _v, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Voltage (V)')),
-          const SizedBox(height: 12),
-          TextField(controller: _i, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Current (A)')),
-          const SizedBox(height: 12),
-          TextField(controller: _r, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Resistance (Ω)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_result != null)
-            _buildResultSection(context, [
-              ResultCard(label: 'Voltage', value: '${_result!.voltage?.toStringAsFixed(3) ?? '—'} V', icon: Icons.bolt_outlined),
-              ResultCard(label: 'Current', value: '${_result!.current?.toStringAsFixed(3) ?? '—'} A', icon: Icons.electric_bolt),
-              ResultCard(label: 'Resistance', value: '${_result!.resistance?.toStringAsFixed(3) ?? '—'} Ω', icon: Icons.electrical_services),
-              ResultCard(label: 'Power', value: '${_result!.power?.toStringAsFixed(3) ?? '—'} W', icon: Icons.power_outlined),
-            ]),
-        ],
+List<CalculatorResult> _bands(Map<String, double> input) => [
+      CalculatorResult(
+        label: 'Colour bands',
+        value: _service.resistanceToColorBands(input['Resistance (Ω)']!),
+        icon: Icons.palette_outlined,
       ),
-    );
-  }
-}
+    ];
 
-class _PowerCalculator extends StatefulWidget {
-  const _PowerCalculator();
-  @override
-  State<_PowerCalculator> createState() => _PowerCalculatorState();
-}
-
-class _PowerCalculatorState extends State<_PowerCalculator> {
-  final _v = TextEditingController();
-  final _i = TextEditingController();
-  final _r = TextEditingController();
-  double? _result;
-  String? _error;
-  final _service = const ElectronicsCalculatorService();
-
-  @override
-  void dispose() {
-    _v.dispose();
-    _i.dispose();
-    _r.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final v = double.tryParse(_v.text);
-    final i = double.tryParse(_i.text);
-    final r = double.tryParse(_r.text);
-    try {
-      setState(() {
-        _result = _service.power(v: v, i: i, r: r);
-        _error = null;
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'Enter exactly two of: voltage, current, resistance';
-        _result = null;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Power')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const FormulaBlock('P = V × I = I² × R = V² / R'),
-          const SizedBox(height: 16),
-          TextField(controller: _v, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Voltage (V)')),
-          const SizedBox(height: 12),
-          TextField(controller: _i, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Current (A)')),
-          const SizedBox(height: 12),
-          TextField(controller: _r, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Resistance (Ω)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_result != null)
-            _buildResultSection(context, [
-              ResultCard(label: 'Power', value: '${_result!.toStringAsFixed(3)} W', icon: Icons.power_outlined),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _VoltageDividerCalculator extends StatefulWidget {
-  const _VoltageDividerCalculator();
-  @override
-  State<_VoltageDividerCalculator> createState() => _VoltageDividerCalculatorState();
-}
-
-class _VoltageDividerCalculatorState extends State<_VoltageDividerCalculator> {
-  final _vin = TextEditingController();
-  final _r1 = TextEditingController();
-  final _r2 = TextEditingController();
-  double? _result;
-  String? _error;
-  final _service = const ElectronicsCalculatorService();
-
-  @override
-  void dispose() {
-    _vin.dispose();
-    _r1.dispose();
-    _r2.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final vin = double.tryParse(_vin.text);
-    final r1 = double.tryParse(_r1.text);
-    final r2 = double.tryParse(_r2.text);
-    if (vin == null || r1 == null || r2 == null) {
-      setState(() {
-        _error = 'Enter all three values';
-        _result = null;
-      });
-      return;
-    }
-    try {
-      setState(() {
-        _result = _service.voltageDivider(vin, r1, r2);
-        _error = null;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _result = null;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Voltage Divider')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const FormulaBlock('Vout = Vin × R2 / (R1 + R2)'),
-          const SizedBox(height: 16),
-          TextField(controller: _vin, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Input voltage (Vin)')),
-          const SizedBox(height: 12),
-          TextField(controller: _r1, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'R1 (Ω)')),
-          const SizedBox(height: 12),
-          TextField(controller: _r2, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'R2 (Ω)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_result != null)
-            _buildResultSection(context, [
-              ResultCard(label: 'Output voltage', value: '${_result!.toStringAsFixed(3)} V', icon: Icons.bolt_outlined),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _CurrentDividerCalculator extends StatefulWidget {
-  const _CurrentDividerCalculator();
-  @override
-  State<_CurrentDividerCalculator> createState() => _CurrentDividerCalculatorState();
-}
-
-class _CurrentDividerCalculatorState extends State<_CurrentDividerCalculator> {
-  final _itotal = TextEditingController();
-  final _r1 = TextEditingController();
-  final _r2 = TextEditingController();
-  List<double>? _results;
-  String? _error;
-  final _service = const ElectronicsCalculatorService();
-
-  @override
-  void dispose() {
-    _itotal.dispose();
-    _r1.dispose();
-    _r2.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final itotal = double.tryParse(_itotal.text);
-    final r1 = double.tryParse(_r1.text);
-    final r2 = double.tryParse(_r2.text);
-    if (itotal == null || r1 == null || r2 == null) {
-      setState(() {
-        _error = 'Enter all three values';
-        _results = null;
-      });
-      return;
-    }
-    try {
-      setState(() {
-        _results = [
-          _service.currentDivider(itotal, r1, r2),
-          _service.currentDivider(itotal, r2, r1),
-        ];
-        _error = null;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _results = null;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Current Divider')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const FormulaBlock('I₁ = Itotal × R₂ / (R₁ + R₂)'),
-          const SizedBox(height: 16),
-          TextField(controller: _itotal, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Total current (A)')),
-          const SizedBox(height: 12),
-          TextField(controller: _r1, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'R1 (Ω)')),
-          const SizedBox(height: 12),
-          TextField(controller: _r2, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'R2 (Ω)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_results != null)
-            _buildResultSection(context, [
-              ResultCard(label: 'Current through R1', value: '${_results![0].toStringAsFixed(4)} A', icon: Icons.electric_bolt),
-              ResultCard(label: 'Current through R2', value: '${_results![1].toStringAsFixed(4)} A', icon: Icons.electric_bolt),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _LedResistorCalculator extends StatefulWidget {
-  const _LedResistorCalculator();
-  @override
-  State<_LedResistorCalculator> createState() => _LedResistorCalculatorState();
-}
-
-class _LedResistorCalculatorState extends State<_LedResistorCalculator> {
-  final _vsupply = TextEditingController();
-  final _vf = TextEditingController();
-  final _if = TextEditingController();
-  double? _result;
-  String? _error;
-  final _service = const ElectronicsCalculatorService();
-
-  @override
-  void dispose() {
-    _vsupply.dispose();
-    _vf.dispose();
-    _if.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final vsupply = double.tryParse(_vsupply.text);
-    final vf = double.tryParse(_vf.text);
-    final ifMa = double.tryParse(_if.text);
-    if (vsupply == null || vf == null || ifMa == null) {
-      setState(() {
-        _error = 'Enter all three values';
-        _result = null;
-      });
-      return;
-    }
-    try {
-      setState(() {
-        _result = _service.ledResistor(vsupply, vf, ifMa);
-        _error = null;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _result = null;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('LED Resistor')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const FormulaBlock('R = (Vsupply − Vf) / If'),
-          const SizedBox(height: 16),
-          TextField(controller: _vsupply, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Supply voltage (V)')),
-          const SizedBox(height: 12),
-          TextField(controller: _vf, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'LED forward voltage (V)')),
-          const SizedBox(height: 12),
-          TextField(controller: _if, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Forward current (mA)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_result != null)
-            _buildResultSection(context, [
-              ResultCard(label: 'Resistor value', value: '${_result!.round()} Ω (use nearest standard)', icon: Icons.electrical_services),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _SeriesResistanceCalculator extends StatefulWidget {
-  const _SeriesResistanceCalculator();
-  @override
-  State<_SeriesResistanceCalculator> createState() => _SeriesResistanceCalculatorState();
-}
-
-class _SeriesResistanceCalculatorState extends State<_SeriesResistanceCalculator> {
-  final _r = [TextEditingController(), TextEditingController(), TextEditingController()];
-  double? _result;
-  final _service = const ElectronicsCalculatorService();
-
-  @override
-  void dispose() {
-    for (final c in _r) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  void _calculate() {
-    final values = <double>[];
-    for (final c in _r) {
-      final v = double.tryParse(c.text);
-      if (v != null) values.add(v);
-    }
-    if (values.isEmpty) return;
-    setState(() => _result = _service.seriesResistance(values));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Series Resistance')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const FormulaBlock('Rtotal = R₁ + R₂ + R₃ + ...'),
-          const SizedBox(height: 16),
-          for (var i = 0; i < 3; i++)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: TextField(controller: _r[i], keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'R${i + 1} (Ω)')),
-            ),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_result != null)
-            _buildResultSection(context, [
-              ResultCard(label: 'Total resistance', value: '${_result!.toStringAsFixed(3)} Ω', icon: Icons.add_circle_outline),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _ParallelResistanceCalculator extends StatefulWidget {
-  const _ParallelResistanceCalculator();
-  @override
-  State<_ParallelResistanceCalculator> createState() => _ParallelResistanceCalculatorState();
-}
-
-class _ParallelResistanceCalculatorState extends State<_ParallelResistanceCalculator> {
-  final _r = [TextEditingController(), TextEditingController(), TextEditingController()];
-  double? _result;
-  String? _error;
-  final _service = const ElectronicsCalculatorService();
-
-  @override
-  void dispose() {
-    for (final c in _r) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  void _calculate() {
-    final values = <double>[];
-    for (final c in _r) {
-      final v = double.tryParse(c.text);
-      if (v != null) values.add(v);
-    }
-    if (values.isEmpty) return;
-    try {
-      setState(() {
-        _result = _service.parallelResistance(values);
-        _error = null;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _result = null;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Parallel Resistance')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const FormulaBlock('1/Rtotal = 1/R₁ + 1/R₂ + 1/R₃ + ...'),
-          const SizedBox(height: 16),
-          for (var i = 0; i < 3; i++)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: TextField(controller: _r[i], keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'R${i + 1} (Ω)')),
-            ),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_result != null)
-            _buildResultSection(context, [
-              ResultCard(label: 'Total resistance', value: '${_result!.toStringAsFixed(3)} Ω', icon: Icons.account_tree_outlined),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _RcCalculator extends StatefulWidget {
-  const _RcCalculator();
-  @override
-  State<_RcCalculator> createState() => _RcCalculatorState();
-}
-
-class _RcCalculatorState extends State<_RcCalculator> {
-  final _r = TextEditingController();
-  final _c = TextEditingController();
-  double? _tau;
-  double? _fc;
-  String? _error;
-  final _service = const ElectronicsCalculatorService();
-
-  @override
-  void dispose() {
-    _r.dispose();
-    _c.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final r = double.tryParse(_r.text);
-    final c = double.tryParse(_c.text);
-    if (r == null || c == null) {
-      setState(() {
-        _error = 'Enter resistance and capacitance';
-        _tau = null;
-        _fc = null;
-      });
-      return;
-    }
-    setState(() {
-      _tau = _service.rcTimeConstant(r, c);
-      _fc = _service.rcCutoffFrequency(r, c);
-      _error = null;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('RC Time Constant')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          const FormulaBlock('τ = R × C    fc = 1 / (2πRC)'),
-          const SizedBox(height: 16),
-          TextField(controller: _r, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Resistance (Ω)')),
-          const SizedBox(height: 12),
-          TextField(controller: _c, keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true), decoration: const InputDecoration(labelText: 'Capacitance (F)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_tau != null)
-            _buildResultSection(context, [
-              ResultCard(label: 'Time constant (τ)', value: '${_tau!.toStringAsFixed(4)} s', icon: Icons.timer_outlined),
-              ResultCard(label: 'Cutoff frequency (fc)', value: '${_fc!.toStringAsFixed(2)} Hz', icon: Icons.graphic_eq),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _ResistanceConverterCalculator extends StatefulWidget {
-  const _ResistanceConverterCalculator();
-  @override
-  State<_ResistanceConverterCalculator> createState() => _ResistanceConverterCalculatorState();
-}
-
-class _ResistanceConverterCalculatorState extends State<_ResistanceConverterCalculator> {
-  final _ohms = TextEditingController();
-  String? _bands;
-  String? _error;
-  final _service = const ElectronicsCalculatorService();
-
-  @override
-  void dispose() {
-    _ohms.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final ohms = double.tryParse(_ohms.text);
-    if (ohms == null || ohms <= 0) {
-      setState(() {
-        _error = 'Enter a valid positive resistance';
-        _bands = null;
-      });
-      return;
-    }
-    setState(() {
-      _bands = _service.resistanceToColorBands(ohms);
-      _error = null;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Resistance Converter')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _ohms, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Resistance (Ω)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Convert')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_bands != null)
-            _buildResultSection(context, [
-              ResultCard(label: 'Color bands', value: _bands!, icon: Icons.palette_outlined),
-            ]),
-        ],
-      ),
-    );
-  }
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

@@ -270,7 +270,7 @@ class CpuSchedulingService {
     final firstResponse = <int, int>{};
     var time = 0;
     var index = 0;
-    while (queue.isNotEmpty || ready.isNotEmpty) {
+    while (index < queue.length || ready.isNotEmpty) {
       while (index < queue.length && queue[index].arrivalTime <= time) {
         ready.add(queue[index]);
         index++;

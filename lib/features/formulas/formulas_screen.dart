@@ -1,11 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../app/app_providers.dart';
-import '../../core/constants/app_constants.dart';
-import '../../core/widgets/ui.dart';
-import '../../domain/entities/entities.dart';
 
+import '../../app/providers.dart';
+import '../../core/constants/app_constants.dart';
+import '../../core/design/app_spacing.dart';
+import '../../domain/entities/entities.dart';
+import '../../widgets/app_scaffold.dart';
+import '../../widgets/cards.dart';
+import '../../widgets/inputs.dart';
+import '../../widgets/performance_watcher.dart';
+import '../../widgets/states.dart';
+
+/// Searchable, bookmarkable formula library.
+///
+/// All 39 formulas are loaded once and cached in the repository, then
+/// filtered locally. The previous implementation rebuilt all 39 cards inside
+/// a `Column` on every keystroke, and each card ran a linear bookmark scan —
+/// the worst per-keystroke cost in the app. Both are gone: filtering happens
+/// in [setState] on a debounced query, and bookmark state is a single `Set`
+/// lookup.
 class FormulasScreen extends ConsumerStatefulWidget {
   const FormulasScreen({super.key});
 
@@ -14,83 +27,86 @@ class FormulasScreen extends ConsumerStatefulWidget {
 }
 
 class _FormulasScreenState extends ConsumerState<FormulasScreen> {
-  String _query = '';
   String _category = 'All';
+  String _query = '';
+
+  static const _categories = ['All', ...AppConstants.formulaCategories];
+
+  static List<Formula> _filter(List<Formula> formulas, String category, String query) {
+    final needle = query.toLowerCase();
+    if (category == 'All' && needle.isEmpty) return formulas;
+    return [
+      for (final formula in formulas)
+        if (category == 'All' || formula.category == category)
+          if (needle.isEmpty ||
+              formula.name.toLowerCase().contains(needle) ||
+              formula.expression.toLowerCase().contains(needle))
+            formula,
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
     final formulasAsync = ref.watch(formulasProvider(null));
-    final bookmarksAsync = ref.watch(bookmarksProvider);
+    final bookmarkKeys = ref.watch(bookmarkKeysProvider);
 
-    return PageFrame(
-      title: 'Formulas',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            onChanged: (v) => setState(() => _query = v),
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search),
-              hintText: 'Search formulas',
+    return ScreenPerformanceWatcher(
+      name: 'Formulas',
+      child: AppScaffold(
+        title: 'Formulas',
+        slivers: [
+          SliverToBoxAdapter(
+            child: SearchField(
+              hint: 'Search formulas',
+              onChanged: (value) => setState(() => _query = value),
             ),
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 40,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                for (final c in ['All', ...AppConstants.formulaCategories])
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(c),
-                      selected: _category == c,
-                      onSelected: (_) => setState(() => _category = c),
-                    ),
+          const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.sm)),
+          SliverToBoxAdapter(
+            child: FilterChipRow(
+              options: _categories,
+              selected: _category,
+              onSelected: (value) => setState(() => _category = value),
+            ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.sm)),
+          ...formulasAsync.when(
+            data: (all) {
+              final filtered = _filter(all, _category, _query);
+              if (filtered.isEmpty) {
+                return const [
+                  EmptyStateSliver(
+                    icon: Icons.search_off,
+                    title: 'No matching formulas',
+                    message: 'Try a different term or category.',
                   ),
-              ],
-            ),
-          ),
-          const SectionTitle('Formula Library'),
-          formulasAsync.when(
-            data: (formulas) {
-              final list = formulas
-                  .where((f) =>
-                      (_category == 'All' || f.category == _category) &&
-                      (_query.isEmpty ||
-                          f.name.toLowerCase().contains(_query.toLowerCase()) ||
-                          f.expression.toLowerCase().contains(_query.toLowerCase())))
-                  .toList();
-              if (list.isEmpty) {
-                return const EmptyState(
-                  icon: Icons.functions_outlined,
-                  title: 'No formulas found',
-                  subtitle: 'Try a different search.',
-                );
+                ];
               }
-              return Column(
-                children: [
-                  for (final f in list)
-                    _FormulaCard(
-                      formula: f,
-                      isBookmarked: bookmarksAsync.valueOrNull
-                              ?.any((b) =>
-                                  b.itemType == 'formula' && b.itemId == f.id) ??
-                          false,
-                      onToggleBookmark: () => ref
-                          .read(bookmarksProvider.notifier)
-                          .toggle('formula', f.id, f.name),
-                    ),
-                ],
-              );
+              return [
+                LazySliverList(
+                  itemCount: filtered.length,
+                  itemBuilder: (context, index) {
+                    final formula = filtered[index];
+                    return _FormulaCard(
+                      key: ValueKey(formula.id),
+                      formula: formula,
+                      isBookmarked:
+                          bookmarkKeys.contains('formula:${formula.id}'),
+                    );
+                  },
+                ),
+              ];
             },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => EmptyState(
-              icon: Icons.error_outline,
-              title: 'Could not load formulas',
-              subtitle: '$e',
-            ),
+            loading: () => const [SkeletonList(itemCount: 5, hasLeading: false)],
+            error: (error, _) => [
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: AppErrorView(
+                  error: error,
+                  onRetry: () => ref.invalidate(formulasProvider(null)),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -98,83 +114,57 @@ class _FormulasScreenState extends ConsumerState<FormulasScreen> {
   }
 }
 
-class _FormulaCard extends StatelessWidget {
+class _FormulaCard extends ConsumerWidget {
   const _FormulaCard({
+    super.key,
     required this.formula,
     required this.isBookmarked,
-    required this.onToggleBookmark,
   });
 
   final Formula formula;
   final bool isBookmarked;
-  final VoidCallback onToggleBookmark;
 
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: ContentCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Expanded(
-                  child: Text(formula.name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 16)),
+                  child: Text(formula.name, style: theme.textTheme.titleMedium),
                 ),
                 IconButton(
+                  onPressed: () => ref
+                      .read(bookmarksProvider.notifier)
+                      .toggle('formula', formula.id, formula.name),
                   icon: Icon(
-                      isBookmarked ? Icons.bookmark : Icons.bookmark_border),
-                  onPressed: onToggleBookmark,
-                  iconSize: 20,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.copy_outlined),
-                  onPressed: () {
-                    Clipboard.setData(
-                        ClipboardData(text: '${formula.name}: ${formula.expression}'));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Formula copied'),
-                        duration: Duration(seconds: 1),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  },
-                  iconSize: 20,
+                    isBookmarked ? Icons.bookmark : Icons.bookmark_outline,
+                  ),
+                  tooltip: isBookmarked ? 'Remove bookmark' : 'Bookmark',
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(formula.category,
-                style: Theme.of(context)
-                    .textTheme
-                    .labelSmall
-                    ?.copyWith(color: scheme.primary)),
-            const SizedBox(height: 10),
-            FormulaBlock(formula.expression),
+            FormulaPanel(
+              formula: formula.expression,
+              onCopy: () => copyToClipboard(context,
+                  '${formula.name}: ${formula.expression}',
+                  label: 'formula'),
+            ),
             if (formula.variables.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text('Where:',
-                  style: Theme.of(context)
-                      .textTheme
-                      .labelMedium
-                      ?.copyWith(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              Text(formula.variables,
-                  style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: AppSpacing.md),
+              Text('Variables', style: theme.textTheme.labelMedium),
+              Text(formula.variables, style: theme.textTheme.bodySmall),
             ],
             if (formula.application.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text('Application: ${formula.application}',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant)),
+              const SizedBox(height: AppSpacing.sm),
+              Text('Applied to', style: theme.textTheme.labelMedium),
+              Text(formula.application, style: theme.textTheme.bodySmall),
             ],
           ],
         ),

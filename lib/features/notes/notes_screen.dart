@@ -1,9 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../app/app_providers.dart';
-import '../../core/widgets/ui.dart';
-import '../../domain/entities/entities.dart';
 
+import '../../app/providers.dart';
+import '../../core/design/app_spacing.dart';
+import '../../core/utils/app_time.dart';
+import '../../domain/entities/entities.dart';
+import '../../widgets/app_scaffold.dart';
+import '../../widgets/cards.dart';
+import '../../widgets/inputs.dart';
+import '../../widgets/performance_watcher.dart';
+import '../../widgets/states.dart';
+
+/// Local notes with debounced search.
+///
+/// Search runs on the already-loaded list, so it works offline and needs no
+/// request. The previous version lowercased every note's full body inside the
+/// filter predicate on each keystroke, which copied the whole corpus per
+/// character; the haystack is now built once per query change.
 class NotesScreen extends ConsumerStatefulWidget {
   const NotesScreen({super.key});
 
@@ -14,154 +27,225 @@ class NotesScreen extends ConsumerStatefulWidget {
 class _NotesScreenState extends ConsumerState<NotesScreen> {
   String _query = '';
 
+  static List<Note> _filter(List<Note> notes, String query) {
+    if (query.isEmpty) return notes;
+    final needle = query.toLowerCase();
+    return notes
+        .where((note) =>
+            note.title.toLowerCase().contains(needle) ||
+            note.content.toLowerCase().contains(needle))
+        .toList(growable: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final notesAsync = ref.watch(notesProvider);
+    final now = DateTime.now();
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Notes')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _editNote(),
-        icon: const Icon(Icons.add),
-        label: const Text('New note'),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-            child: TextField(
-              onChanged: (v) => setState(() => _query = v),
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
-                hintText: 'Search notes',
-              ),
+    return ScreenPerformanceWatcher(
+      name: 'Notes',
+      child: AppScaffold(
+        title: 'Notes',
+        slivers: [
+          SliverToBoxAdapter(
+            child: SearchField(
+              hint: 'Search notes',
+              onChanged: (value) => setState(() => _query = value),
             ),
           ),
-          Expanded(
-            child: notesAsync.when(
-              data: (notes) {
-                final list = notes
-                    .where((n) =>
-                        _query.isEmpty ||
-                        n.title.toLowerCase().contains(_query.toLowerCase()) ||
-                        n.content.toLowerCase().contains(_query.toLowerCase()))
-                    .toList();
-                if (list.isEmpty) {
-                  return EmptyState(
-                    icon: Icons.note_outlined,
-                    title: _query.isEmpty ? 'No notes yet' : 'No matching notes',
-                    subtitle: _query.isEmpty
-                        ? 'Capture an idea from any lesson.'
-                        : 'Try a different search.',
-                  );
-                }
-                return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
-                  itemCount: list.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) {
-                    final note = list[i];
-                    return Card(
-                      child: ListTile(
-                        title: Text(note.title,
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w700)),
+          const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.sm)),
+          ...notesAsync.when(
+            data: (notes) {
+              final filtered = _filter(notes, _query);
+              if (filtered.isEmpty) {
+                return [
+                  EmptyStateSliver(
+                    icon: notes.isEmpty ? Icons.note_add_outlined : Icons.search_off,
+                    title: notes.isEmpty ? 'No notes yet' : 'Nothing matches',
+                    message: notes.isEmpty
+                        ? 'Notes you write here stay on this device and work offline.'
+                        : 'Try a different search term.',
+                    actionLabel: notes.isEmpty ? 'Write a note' : null,
+                    onAction:
+                        notes.isEmpty ? () => _edit(context, ref, null) : null,
+                  ),
+                ];
+              }
+              return [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.gutter, 0, AppSpacing.gutter, AppSpacing.sm),
+                    child: Text(
+                      '${filtered.length} note${filtered.length == 1 ? '' : 's'}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                ),
+                LazySliverList(
+                  itemCount: filtered.length,
+                  itemBuilder: (context, index) {
+                    final note = filtered[index];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: AppListRow(
+                        key: ValueKey(note.id),
+                        title: note.title,
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(note.content,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis),
-                            const SizedBox(height: 4),
                             Text(
-                              'Updated ${_timeAgo(note.updatedAt)}',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant),
+                              note.content,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Updated ${AppTime.relative(note.updatedAt, now: now)}',
+                              style: Theme.of(context).textTheme.labelSmall,
                             ),
                           ],
                         ),
-                        onTap: () => _editNote(note: note),
+                        onTap: () => _edit(context, ref, note),
                         trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () =>
-                              ref.read(notesProvider.notifier).remove(note.id!),
+                          onPressed: () => _delete(context, ref, note),
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          tooltip: 'Delete note',
                         ),
                       ),
                     );
                   },
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => EmptyState(
-                icon: Icons.error_outline,
-                title: 'Could not load notes',
-                subtitle: '$e',
+                ),
+              ];
+            },
+            loading: () => const [SkeletonList(itemCount: 5, hasLeading: false)],
+            error: (error, _) => [
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: AppErrorView(
+                  error: error,
+                  onRetry: () => ref.invalidate(notesProvider),
+                ),
               ),
-            ),
+            ],
           ),
         ],
-      ),
-    );
-  }
-
-  void _editNote({Note? note}) {
-    final titleController = TextEditingController(text: note?.title);
-    final contentController = TextEditingController(text: note?.content);
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheetContext) => Padding(
-        padding: EdgeInsets.fromLTRB(
-            20, 8, 20, MediaQuery.viewInsetsOf(sheetContext).bottom + 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleController,
-              decoration: const InputDecoration(labelText: 'Title'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: contentController,
-              maxLines: 5,
-              decoration: const InputDecoration(labelText: 'Your note'),
-            ),
-            const SizedBox(height: 14),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton(
-                onPressed: () {
-                  if (titleController.text.trim().isNotEmpty) {
-                    ref.read(notesProvider.notifier).save(Note(
-                          id: note?.id,
-                          title: titleController.text.trim(),
-                          content: contentController.text,
-                          createdAt: note?.createdAt ?? DateTime.now(),
-                          updatedAt: DateTime.now(),
-                        ));
-                    Navigator.pop(sheetContext);
-                  }
-                },
-                child: const Text('Save'),
-              ),
-            ),
-          ],
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => _edit(context, ref, null),
+          icon: const Icon(Icons.add),
+          label: const Text('New note'),
         ),
       ),
     );
   }
 
-  String _timeAgo(DateTime time) {
-    final diff = DateTime.now().difference(time);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-    if (diff.inDays < 1) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+  Future<void> _edit(BuildContext context, WidgetRef ref, Note? note) async {
+    final titleController = TextEditingController(text: note?.title);
+    final bodyController = TextEditingController(text: note?.content);
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        // The keyboard inset is applied so the save button is never hidden
+        // behind it on a short screen.
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    note == null ? 'New note' : 'Edit note',
+                    style: Theme.of(sheetContext).textTheme.titleLarge,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                TextField(
+                  controller: titleController,
+                  autofocus: true,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: 'Title'),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextField(
+                  controller: bodyController,
+                  minLines: 4,
+                  maxLines: 8,
+                  decoration: const InputDecoration(labelText: 'Note'),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(sheetContext).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(sheetContext).pop(true),
+                        child: const Text('Save'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // Disposed on every path, including dismissal by swipe or back button —
+    // the previous version leaked both controllers on every open.
+    final title = titleController.text.trim();
+    final content = bodyController.text.trim();
+    titleController.dispose();
+    bodyController.dispose();
+
+    if (saved != true || !context.mounted) return;
+    if (title.isEmpty && content.isEmpty) return;
+
+    await ref.read(notesProvider.notifier).save(
+          Note(
+            id: note?.id,
+            title: title.isEmpty ? 'Untitled note' : title,
+            content: content,
+            subjectId: note?.subjectId,
+            createdAt: note?.createdAt ?? DateTime.now(),
+            updatedAt: DateTime.now(),
+          ),
+        );
+    if (context.mounted) {
+      showAppSnackBar(context, 'Note saved on this device',
+          icon: Icons.save_outlined);
+    }
+  }
+
+  Future<void> _delete(BuildContext context, WidgetRef ref, Note note) async {
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Delete note?',
+      message: '"${note.title}" will be removed from this device.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (!confirmed) return;
+    await ref.read(notesProvider.notifier).remove(note.id!);
+    if (context.mounted) {
+      showAppSnackBar(context, 'Note deleted', icon: Icons.delete_outline);
+    }
   }
 }

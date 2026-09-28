@@ -1,97 +1,158 @@
 import 'package:flutter/material.dart';
-import '../../core/widgets/ui.dart';
-import '../../domain/services/networking_calculator_service.dart';
 
+import '../../core/design/app_spacing.dart';
+import '../../core/error/app_exception.dart';
+import '../../domain/services/networking_calculator_service.dart';
+import '../../widgets/app_scaffold.dart';
+import '../../widgets/calculator.dart';
+import '../../widgets/cards.dart';
+import '../../widgets/inputs.dart';
+import '../../widgets/performance_watcher.dart';
+
+/// Networking calculators: subnetting, CIDR, address ranges and data rates.
+///
+/// The two subnet tools take text rather than numbers, so they are bespoke
+/// screens; the numeric ones use the shared [CalculatorField] pattern.
 class NetworkingCalculatorScreen extends StatelessWidget {
   const NetworkingCalculatorScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Networking Calculators')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Card(
-            color: Theme.of(context).colorScheme.secondaryContainer,
-            child: const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Educational calculators for IP addressing, subnetting, and data rates.',
-                style: TextStyle(fontSize: 14),
+    return ScreenPerformanceWatcher(
+      name: 'Networking',
+      child: AppScaffold(
+        title: 'Networking',
+        slivers: [
+          const SliverToBoxAdapter(
+            child: _Intro(
+              text: 'Subnetting, address conversion and link maths. '
+                  'Everything is computed on this device.',
+            ),
+          ),
+          const SliverSectionHeader(title: 'Addressing'),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+              child: Column(
+                children: [
+                  AppListRow(
+                    title: 'Subnet calculator',
+                    subtitle: Text('Network, mask, hosts and broadcast'),
+                    leading: const Icon(Icons.lan_outlined),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const _SubnetCalculatorScreen(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  AppListRow(
+                    title: 'Subnet splitter',
+                    subtitle: Text('VLSM split of a block into equal subnets'),
+                    leading: const Icon(Icons.call_split),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const _SubnetSplitScreen(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  AppListRow(
+                    title: 'Address converter',
+                    subtitle: Text('IPv4 to binary, or CIDR to mask'),
+                    leading: const Icon(Icons.swap_horiz),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const _AddressConverterScreen(),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          _CalcItem('IPv4 Calculator', Icons.dns_outlined, 'IP + mask details', () => _push(context, const _Ipv4Calc())),
-          _CalcItem('CIDR Calculator', Icons.tag_outlined, 'Prefix to mask', () => _push(context, const _CidrCalc())),
-          _CalcItem('Subnet Calculator', Icons.account_tree_outlined, 'Network, broadcast, hosts', () => _push(context, const _SubnetCalc())),
-          _CalcItem('IP Range Calculator', Icons.linear_scale_outlined, 'List addresses in range', () => _push(context, const _IpRangeCalc())),
-          _CalcItem('Binary IP Converter', Icons.code_outlined, 'IP ↔ binary', () => _push(context, const _BinaryIpCalc())),
-          _CalcItem('Data Rate Converter', Icons.swap_horiz_outlined, 'bps, kbps, Mbps', () => _push(context, const _DataRateCalc())),
-          _CalcItem('Bandwidth Calculator', Icons.speed_outlined, 'Transfer time', () => _push(context, const _BandwidthCalc())),
-          _CalcItem('Throughput Calculator', Icons.trending_up_outlined, 'Goodput ratio', () => _push(context, const _ThroughputCalc())),
-          _CalcItem('Latency Calculator', Icons.timer_outlined, 'Propagation delay', () => _push(context, const _LatencyCalc())),
+          const SliverSectionHeader(title: 'Rates'),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+              child: Column(
+                children: [
+                  AppListRow(
+                    title: 'Data rate converter',
+                    subtitle: Text('bps through Tbps'),
+                    leading: const Icon(Icons.speed),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const _DataRateScreen(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  AppListRow(
+                    title: 'Bandwidth and time',
+                    subtitle: Text('Transfer time, throughput, latency, RTT'),
+                    leading: const Icon(Icons.schedule),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const _BandwidthScreen(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  AppListRow(
+                    title: 'Channel capacity',
+                    subtitle: Text('Nyquist rate, Shannon capacity, SNR'),
+                    leading: const Icon(Icons.graphic_eq),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const _CapacityScreen(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
-
-  static void _push(BuildContext context, Widget screen) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
-  }
 }
 
-class _CalcItem extends StatelessWidget {
-  const _CalcItem(this.title, this.icon, this.subtitle, this.onTap);
-  final String title, subtitle;
-  final IconData icon;
-  final VoidCallback onTap;
+class _Intro extends StatelessWidget {
+  const _Intro({required this.text});
+  final String text;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Card(
-        child: ListTile(
-          leading: CircleAvatar(
-            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-            child: Icon(icon, color: Theme.of(context).colorScheme.onPrimaryContainer),
-          ),
-          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text(subtitle),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: onTap,
-        ),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.gutter, AppSpacing.sm, AppSpacing.gutter, 0),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
       ),
     );
   }
 }
 
-Widget _resultSection(BuildContext context, List<Widget> cards) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const SizedBox(height: 16),
-      Text('Results', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-      const SizedBox(height: 10),
-      ...cards,
-    ],
-  );
-}
+// --- Subnet ---------------------------------------------------------------
 
-class _Ipv4Calc extends StatefulWidget {
-  const _Ipv4Calc();
+class _SubnetCalculatorScreen extends StatefulWidget {
+  const _SubnetCalculatorScreen();
+
   @override
-  State<_Ipv4Calc> createState() => _Ipv4CalcState();
+  State<_SubnetCalculatorScreen> createState() => _SubnetCalculatorScreenState();
 }
 
-class _Ipv4CalcState extends State<_Ipv4Calc> {
-  final _ip = TextEditingController();
+class _SubnetCalculatorScreenState extends State<_SubnetCalculatorScreen> {
+  final _ip = TextEditingController(text: '192.168.1.0');
   final _cidr = TextEditingController(text: '24');
+  String _mask = '';
   SubnetInfo? _result;
   String? _error;
-  final _service = const NetworkingCalculatorService();
 
   @override
   void dispose() {
@@ -101,22 +162,24 @@ class _Ipv4CalcState extends State<_Ipv4Calc> {
   }
 
   void _calculate() {
-    final cidr = int.tryParse(_cidr.text);
-    if (cidr == null || cidr < 0 || cidr > 32) {
-      setState(() {
-        _error = 'CIDR must be 0–32';
-        _result = null;
-      });
-      return;
-    }
     try {
+      final info = NetworkingCalculatorService().calculateSubnet(
+        _ip.text.trim(),
+        cidr: int.tryParse(_cidr.text.trim()),
+      );
       setState(() {
-        _result = _service.calculateSubnet(_ip.text, cidr: cidr);
+        _result = info;
+        _mask = info.subnetMask.dotted;
         _error = null;
       });
-    } catch (e) {
+    } on AppException catch (error) {
       setState(() {
-        _error = 'Invalid IP address';
+        _error = error.message;
+        _result = null;
+      });
+    } on Object catch (error) {
+      setState(() {
+        _error = 'Could not read that address: $error';
         _result = null;
       });
     }
@@ -124,131 +187,87 @@ class _Ipv4CalcState extends State<_Ipv4Calc> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('IPv4 Calculator')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _ip, decoration: const InputDecoration(labelText: 'IP address', hintText: '192.168.1.10')),
-          const SizedBox(height: 12),
-          TextField(controller: _cidr, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'CIDR prefix', hintText: '24')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+    return ScreenPerformanceWatcher(
+      name: 'Subnet calculator',
+      child: AppScaffold(
+        title: 'Subnet calculator',
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.gutter),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const FormulaPanel(
+                      formula: 'hosts = 2^(32−CIDR) − 2', label: 'Formula'),
+                  const SizedBox(height: AppSpacing.lg),
+                  TextField(
+                    controller: _ip,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'IP address'),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  TextField(
+                    controller: _cidr,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'CIDR prefix'),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  FilledButton.icon(
+                    onPressed: _calculate,
+                    icon: const Icon(Icons.calculate_outlined),
+                    label: const Text('Calculate'),
+                  ),
+                  if (_error != null) ErrorBanner(message: _error!),
+                ],
               ),
             ),
-          ],
+          ),
           if (_result != null)
-            _resultSection(context, [
-              ResultCard(label: 'Network', value: _result!.networkAddress.dotted, icon: Icons.lan_outlined),
-              ResultCard(label: 'Broadcast', value: _result!.broadcastAddress.dotted, icon: Icons.campaign_outlined),
-              ResultCard(label: 'Subnet mask', value: _result!.subnetMask.dotted, icon: Icons.filter_alt_outlined),
-              ResultCard(label: 'Wildcard mask', value: _result!.wildcardMask.dotted, icon: Icons.filter_alt_off_outlined),
-              ResultCard(label: 'First host', value: _result!.firstHost.dotted, icon: Icons.computer_outlined),
-              ResultCard(label: 'Last host', value: _result!.lastHost.dotted, icon: Icons.computer),
-              ResultCard(label: 'Usable hosts', value: '${_result!.usableHosts}', icon: Icons.devices_outlined),
-              ResultCard(label: 'CIDR', value: '/${_result!.cidr}', icon: Icons.tag_outlined),
-              ResultCard(label: 'Class', value: _result!.ipClass, icon: Icons.class_outlined),
-              ResultCard(label: 'Private', value: _result!.isPrivate ? 'Yes' : 'No', icon: Icons.lock_outline),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _CidrCalc extends StatefulWidget {
-  const _CidrCalc();
-  @override
-  State<_CidrCalc> createState() => _CidrCalcState();
-}
-
-class _CidrCalcState extends State<_CidrCalc> {
-  final _cidr = TextEditingController();
-  IpAddress? _mask;
-  IpAddress? _wildcard;
-  int? _hosts;
-  String? _error;
-  final _service = const NetworkingCalculatorService();
-
-  @override
-  void dispose() {
-    _cidr.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final cidr = int.tryParse(_cidr.text);
-    if (cidr == null || cidr < 0 || cidr > 32) {
-      setState(() {
-        _error = 'CIDR must be 0–32';
-        _mask = null;
-        _wildcard = null;
-        _hosts = null;
-      });
-      return;
-    }
-    final mask = _service.maskFromCidr(cidr);
-    setState(() {
-      _mask = mask;
-      _wildcard = ~mask;
-      _hosts = cidr >= 31 ? (cidr == 32 ? 1 : 2) : (1 << (32 - cidr)) - 2;
-      _error = null;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('CIDR Calculator')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _cidr, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'CIDR prefix', hintText: '24')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Convert')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
+            SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.gutter, AppSpacing.lg, AppSpacing.gutter, 0),
+                child: Column(
+                  children: [
+                    ResultCard(label: 'Network address', value: _result!.networkAddress.dotted),
+                    ResultCard(label: 'Subnet mask', value: _mask),
+                    ResultCard(
+                        label: 'First host',
+                        value: _result!.firstHost.dotted),
+                    ResultCard(
+                        label: 'Broadcast address',
+                        value: _result!.broadcastAddress.dotted),
+                    ResultCard(
+                        label: 'Last host', value: _result!.lastHost.dotted),
+                    ResultCard(
+                      label: 'Usable hosts',
+                      value: '${_result!.usableHosts}',
+                      icon: Icons.devices,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ],
-          if (_mask != null)
-            _resultSection(context, [
-              ResultCard(label: 'Subnet mask', value: _mask!.dotted, icon: Icons.filter_alt_outlined),
-              ResultCard(label: 'Wildcard', value: _wildcard!.dotted, icon: Icons.filter_alt_off_outlined),
-              ResultCard(label: 'Total addresses', value: '${(_hosts ?? 0) + 2}', icon: Icons.numbers_outlined),
-              ResultCard(label: 'Usable hosts', value: '$_hosts', icon: Icons.devices_outlined),
-            ]),
         ],
       ),
     );
   }
 }
 
-class _SubnetCalc extends StatefulWidget {
-  const _SubnetCalc();
+class _SubnetSplitScreen extends StatefulWidget {
+  const _SubnetSplitScreen();
+
   @override
-  State<_SubnetCalc> createState() => _SubnetCalcState();
+  State<_SubnetSplitScreen> createState() => _SubnetSplitScreenState();
 }
 
-class _SubnetCalcState extends State<_SubnetCalc> {
-  final _ip = TextEditingController();
+class _SubnetSplitScreenState extends State<_SubnetSplitScreen> {
+  final _ip = TextEditingController(text: '192.168.1.0');
   final _cidr = TextEditingController(text: '24');
   final _newCidr = TextEditingController(text: '26');
-  List<SubnetInfo>? _result;
+  List<SubnetInfo> _results = const [];
   String? _error;
-  final _service = const NetworkingCalculatorService();
 
   @override
   void dispose() {
@@ -259,226 +278,124 @@ class _SubnetCalcState extends State<_SubnetCalc> {
   }
 
   void _calculate() {
-    final cidr = int.tryParse(_cidr.text);
-    final newCidr = int.tryParse(_newCidr.text);
-    if (cidr == null || newCidr == null) {
-      setState(() {
-        _error = 'Enter valid CIDR values';
-        _result = null;
-      });
-      return;
-    }
     try {
+      final split = NetworkingCalculatorService().subnetSplit(
+        _ip.text.trim(),
+        int.parse(_cidr.text.trim()),
+        int.parse(_newCidr.text.trim()),
+      );
       setState(() {
-        _result = _service.subnetSplit(_ip.text, cidr, newCidr);
+        _results = split;
         _error = null;
       });
-    } catch (e) {
+    } on Object catch (error) {
       setState(() {
-        _error = e.toString();
-        _result = null;
+        _error = 'Could not split that block: $error';
+        _results = const [];
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Subnet Calculator')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _ip, decoration: const InputDecoration(labelText: 'IP address')),
-          const SizedBox(height: 12),
-          TextField(controller: _cidr, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Current CIDR')),
-          const SizedBox(height: 12),
-          TextField(controller: _newCidr, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'New CIDR')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Subnet')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_result != null) ...[
-            Text('${_result!.length} subnets', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 10),
-            for (var i = 0; i < _result!.length; i++)
-              Card(
-                margin: const EdgeInsets.only(bottom: 10),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    return ScreenPerformanceWatcher(
+      name: 'Subnet splitter',
+      child: AppScaffold(
+        title: 'Subnet splitter',
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.gutter),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const FormulaPanel(
+                      formula: 'subnets = 2^(newCIDR − oldCIDR)',
+                      label: 'Formula'),
+                  const SizedBox(height: AppSpacing.lg),
+                  TextField(
+                    controller: _ip,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Network address'),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Row(
                     children: [
-                      Text('Subnet ${i + 1}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 6),
-                      Text('Network: ${_result![i].networkAddress.dotted}'),
-                      Text('Broadcast: ${_result![i].broadcastAddress.dotted}'),
-                      Text('Range: ${_result![i].firstHost.dotted} – ${_result![i].lastHost.dotted}'),
-                      Text('Hosts: ${_result![i].usableHosts}'),
+                      Expanded(
+                        child: TextField(
+                          controller: _cidr,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Current CIDR'),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: TextField(
+                          controller: _newCidr,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'New CIDR'),
+                        ),
+                      ),
                     ],
                   ),
-                ),
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _IpRangeCalc extends StatefulWidget {
-  const _IpRangeCalc();
-  @override
-  State<_IpRangeCalc> createState() => _IpRangeCalcState();
-}
-
-class _IpRangeCalcState extends State<_IpRangeCalc> {
-  final _start = TextEditingController();
-  final _end = TextEditingController();
-  List<String>? _result;
-  String? _error;
-  final _service = const NetworkingCalculatorService();
-
-  @override
-  void dispose() {
-    _start.dispose();
-    _end.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    try {
-      final range = _service.ipRange(_start.text, _end.text);
-      setState(() {
-        _result = range;
-        _error = null;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _result = null;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('IP Range Calculator')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _start, decoration: const InputDecoration(labelText: 'Start IP')),
-          const SizedBox(height: 12),
-          TextField(controller: _end, decoration: const InputDecoration(labelText: 'End IP')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('List')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+                  const SizedBox(height: AppSpacing.lg),
+                  FilledButton.icon(
+                    onPressed: _calculate,
+                    icon: const Icon(Icons.call_split),
+                    label: const Text('Split'),
+                  ),
+                  if (_error != null) ErrorBanner(message: _error!),
+                ],
               ),
             ),
-          ],
-          if (_result != null)
-            _resultSection(context, [
-              ResultCard(label: 'Addresses', value: '${_result!.length}', icon: Icons.format_list_numbered_outlined),
-              for (var i = 0; i < _result!.length && i < 20; i++)
-                ResultCard(label: 'IP $i', value: _result![i], icon: Icons.dns_outlined),
-              if (_result!.length > 20)
-                Text('... and ${_result!.length - 20} more'),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _BinaryIpCalc extends StatefulWidget {
-  const _BinaryIpCalc();
-  @override
-  State<_BinaryIpCalc> createState() => _BinaryIpCalcState();
-}
-
-class _BinaryIpCalcState extends State<_BinaryIpCalc> {
-  final _ip = TextEditingController();
-  String? _binary;
-  String? _error;
-  final _service = const NetworkingCalculatorService();
-
-  @override
-  void dispose() {
-    _ip.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    try {
-      setState(() {
-        _binary = _service.ipToBinary(_ip.text);
-        _error = null;
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'Invalid IP address';
-        _binary = null;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Binary IP Converter')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _ip, decoration: const InputDecoration(labelText: 'IP address')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Convert')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
+          ),
+          if (_results.isNotEmpty) ...[
+            const SliverSectionHeader(
+                title: 'Subnets', subtitle: 'Newest first'),
+            LazySliverList(
+              itemCount: _results.length,
+              itemBuilder: (context, index) {
+                final sub = _results[index];
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.gutter, 0, AppSpacing.gutter, AppSpacing.sm),
+                  child: Card(
+                    key: ValueKey('${sub.networkAddress.dotted}/$index'),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        radius: 14,
+                        child: Text('${index + 1}'),
+                      ),
+                      title: Text(sub.networkAddress.dotted),
+                      subtitle: Text(
+                          '${sub.firstHost.dotted} – ${sub.lastHost.dotted}\n'
+                          '${sub.usableHosts} usable hosts'),
+                      isThreeLine: true,
+                    ),
+                  ),
+                );
+              },
             ),
           ],
-          if (_binary != null)
-            _resultSection(context, [
-              ResultCard(label: 'Binary', value: _binary!, icon: Icons.code_outlined),
-            ]),
         ],
       ),
     );
   }
 }
 
-class _DataRateCalc extends StatefulWidget {
-  const _DataRateCalc();
+class _AddressConverterScreen extends StatefulWidget {
+  const _AddressConverterScreen();
+
   @override
-  State<_DataRateCalc> createState() => _DataRateCalcState();
+  State<_AddressConverterScreen> createState() =>
+      _AddressConverterScreenState();
 }
 
-class _DataRateCalcState extends State<_DataRateCalc> {
-  final _value = TextEditingController();
-  String _from = 'Mbps';
-  String _to = 'Gbps';
-  double? _result;
+class _AddressConverterScreenState extends State<_AddressConverterScreen> {
+  final _value = TextEditingController(text: '192.168.1.1');
+  String? _output;
+  String? _label;
   String? _error;
-  final _service = const NetworkingCalculatorService();
 
   @override
   void dispose() {
@@ -486,288 +403,275 @@ class _DataRateCalcState extends State<_DataRateCalc> {
     super.dispose();
   }
 
-  void _calculate() {
-    final value = double.tryParse(_value.text);
-    if (value == null) {
-      setState(() {
-        _error = 'Enter a valid value';
-        _result = null;
-      });
-      return;
-    }
-    setState(() {
-      _result = _service.convertDataRate(value, _from, _to);
-      _error = null;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Data Rate Converter')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _value, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Value')),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _from,
-                  decoration: const InputDecoration(labelText: 'From'),
-                  items: const [
-                    DropdownMenuItem(value: 'bps', child: Text('bps')),
-                    DropdownMenuItem(value: 'Kbps', child: Text('Kbps')),
-                    DropdownMenuItem(value: 'Mbps', child: Text('Mbps')),
-                    DropdownMenuItem(value: 'Gbps', child: Text('Gbps')),
-                    DropdownMenuItem(value: 'Tbps', child: Text('Tbps')),
-                  ],
-                  onChanged: (v) => setState(() => _from = v ?? 'Mbps'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _to,
-                  decoration: const InputDecoration(labelText: 'To'),
-                  items: const [
-                    DropdownMenuItem(value: 'bps', child: Text('bps')),
-                    DropdownMenuItem(value: 'Kbps', child: Text('Kbps')),
-                    DropdownMenuItem(value: 'Mbps', child: Text('Mbps')),
-                    DropdownMenuItem(value: 'Gbps', child: Text('Gbps')),
-                    DropdownMenuItem(value: 'Tbps', child: Text('Tbps')),
-                  ],
-                  onChanged: (v) => setState(() => _to = v ?? 'Gbps'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Convert')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_result != null)
-            _resultSection(context, [
-              ResultCard(label: 'Result', value: '${_result!.toStringAsFixed(6)} $_to', icon: Icons.swap_horiz_outlined),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _BandwidthCalc extends StatefulWidget {
-  const _BandwidthCalc();
-  @override
-  State<_BandwidthCalc> createState() => _BandwidthCalcState();
-}
-
-class _BandwidthCalcState extends State<_BandwidthCalc> {
-  final _size = TextEditingController();
-  final _bw = TextEditingController();
-  double? _result;
-  String? _error;
-  final _service = const NetworkingCalculatorService();
-
-  @override
-  void dispose() {
-    _size.dispose();
-    _bw.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final size = double.tryParse(_size.text);
-    final bw = double.tryParse(_bw.text);
-    if (size == null || bw == null) {
-      setState(() {
-        _error = 'Enter size and bandwidth';
-        _result = null;
-      });
-      return;
-    }
-    setState(() {
-      _result = _service.bandwidthTime(size, bw);
-      _error = null;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Bandwidth Calculator')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _size, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Data size (Mb)')),
-          const SizedBox(height: 12),
-          TextField(controller: _bw, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Bandwidth (Mbps)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
-              ),
-            ),
-          ],
-          if (_result != null)
-            _resultSection(context, [
-              ResultCard(label: 'Transfer time', value: '${_result!.toStringAsFixed(3)} seconds', icon: Icons.speed_outlined),
-            ]),
-        ],
-      ),
-    );
-  }
-}
-
-class _ThroughputCalc extends StatefulWidget {
-  const _ThroughputCalc();
-  @override
-  State<_ThroughputCalc> createState() => _ThroughputCalcState();
-}
-
-class _ThroughputCalcState extends State<_ThroughputCalc> {
-  final _good = TextEditingController();
-  final _total = TextEditingController();
-  double? _result;
-  String? _error;
-  final _service = const NetworkingCalculatorService();
-
-  @override
-  void dispose() {
-    _good.dispose();
-    _total.dispose();
-    super.dispose();
-  }
-
-  void _calculate() {
-    final good = double.tryParse(_good.text);
-    final total = double.tryParse(_total.text);
-    if (good == null || total == null) {
-      setState(() {
-        _error = 'Enter goodput and total';
-        _result = null;
-      });
-      return;
-    }
+  void _convert() {
+    final raw = _value.text.trim();
     try {
+      final service = NetworkingCalculatorService();
+      if (raw.contains('/')) {
+        final parts = raw.split('/');
+        final mask = service.maskFromCidr(int.tryParse(parts.last) ?? 24);
+        setState(() {
+          _output = mask.dotted;
+          _label = 'Subnet mask';
+          _error = null;
+        });
+      } else if (raw.contains('.')) {
+        setState(() {
+          _output = service.ipToBinary(raw);
+          _label = 'Binary';
+          _error = null;
+        });
+      } else if (RegExp(r'^[01]{8,}(\\.[01]{8,})*\$').hasMatch(raw)) {
+        setState(() {
+          _output = service.binaryToIp(raw);
+          _label = 'IPv4 address';
+          _error = null;
+        });
+      } else {
+        setState(() {
+          _error = 'Enter an IPv4 address, a binary string, or CIDR like /24';
+          _output = null;
+        });
+      }
+    } on Object {
       setState(() {
-        _result = _service.throughput(good, total);
-        _error = null;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _result = null;
+        _error = 'Could not read that value';
+        _output = null;
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Throughput Calculator')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _good, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Goodput (bits)')),
-          const SizedBox(height: 12),
-          TextField(controller: _total, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Total sent (bits)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+    return ScreenPerformanceWatcher(
+      name: 'Address converter',
+      child: AppScaffold(
+        title: 'Address converter',
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.gutter),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: _value,
+                    decoration: const InputDecoration(
+                      labelText: 'IPv4, binary, or CIDR',
+                      hintText: '192.168.1.1 or 11000000.10101000… or /24',
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  FilledButton.icon(
+                    onPressed: _convert,
+                    icon: const Icon(Icons.swap_horiz),
+                    label: const Text('Convert'),
+                  ),
+                  if (_error != null) ErrorBanner(message: _error!),
+                ],
               ),
             ),
-          ],
-          if (_result != null)
-            _resultSection(context, [
-              ResultCard(label: 'Throughput ratio', value: '${(_result! * 100).toStringAsFixed(2)}%', icon: Icons.trending_up_outlined),
-            ]),
+          ),
+          if (_output != null)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.gutter),
+                child: ResultCard(
+                  label: _label ?? 'Result',
+                  value: _output!,
+                  onCopy: () => copyToClipboard(context, _output!),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-class _LatencyCalc extends StatefulWidget {
-  const _LatencyCalc();
+// --- Rates ----------------------------------------------------------------
+
+class _DataRateScreen extends StatefulWidget {
+  const _DataRateScreen();
+
   @override
-  State<_LatencyCalc> createState() => _LatencyCalcState();
+  State<_DataRateScreen> createState() => _DataRateScreenState();
 }
 
-class _LatencyCalcState extends State<_LatencyCalc> {
-  final _dist = TextEditingController();
+class _DataRateScreenState extends State<_DataRateScreen> {
+  final _value = TextEditingController(text: '100');
+  String _from = 'Mbps';
+  String _to = 'Gbps';
   double? _result;
   String? _error;
-  final _service = const NetworkingCalculatorService();
+
+  static const _units = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps', 'Bps', 'KB/s', 'MB/s', 'GB/s'];
 
   @override
   void dispose() {
-    _dist.dispose();
+    _value.dispose();
     super.dispose();
   }
 
-  void _calculate() {
-    final dist = double.tryParse(_dist.text);
-    if (dist == null) {
+  void _convert() {
+    final input = double.tryParse(_value.text.trim());
+    if (input == null) {
       setState(() {
-        _error = 'Enter distance';
+        _error = 'Enter a number';
         _result = null;
       });
       return;
     }
     setState(() {
-      _result = _service.latency(dist);
+      _result = NetworkingCalculatorService().convertDataRate(input, _from, _to);
       _error = null;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Latency Calculator')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          TextField(controller: _dist, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Distance (km)')),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _calculate, child: const Text('Calculate')),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+    return ScreenPerformanceWatcher(
+      name: 'Data rate converter',
+      child: AppScaffold(
+        title: 'Data rate',
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.gutter),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: _value,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Value'),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _from,
+                          decoration: const InputDecoration(labelText: 'From'),
+                          items: [
+                            for (final unit in _units)
+                              DropdownMenuItem(value: unit, child: Text(unit)),
+                          ],
+                          onChanged: (v) => setState(() => _from = v ?? _from),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _to,
+                          decoration: const InputDecoration(labelText: 'To'),
+                          items: [
+                            for (final unit in _units)
+                              DropdownMenuItem(value: unit, child: Text(unit)),
+                          ],
+                          onChanged: (v) => setState(() => _to = v ?? _to),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  FilledButton.icon(
+                    onPressed: _convert,
+                    icon: const Icon(Icons.swap_horiz),
+                    label: const Text('Convert'),
+                  ),
+                  if (_error != null) ErrorBanner(message: _error!),
+                ],
               ),
             ),
-          ],
+          ),
           if (_result != null)
-            _resultSection(context, [
-              ResultCard(label: 'Latency', value: '${(_result! * 1000).toStringAsFixed(3)} ms', icon: Icons.timer_outlined),
-              ResultCard(label: 'Round-trip (RTT)', value: '${(_result! * 2000).toStringAsFixed(3)} ms', icon: Icons.sync_outlined),
-            ]),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.gutter),
+                child: ResultCard(
+                  label: '$_from → $_to',
+                  value: '${_result!.toStringAsFixed(4)} $_to',
+                  icon: Icons.speed,
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
+}
+
+class _BandwidthScreen extends StatelessWidget {
+  const _BandwidthScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const CalculatorScreen(
+      title: 'Bandwidth and time',
+      formula: 't = data / bandwidth',
+      fields: [
+        CalculatorField(label: 'Transfer size (Mb)'),
+        CalculatorField(label: 'Bandwidth (Mbps)'),
+      ],
+      compute: _bandwidth,
+    );
+  }
+}
+
+List<CalculatorResult> _bandwidth(Map<String, double> input) {
+  final time = NetworkingCalculatorService()
+      .bandwidthTime(input['Transfer size (Mb)']!, input['Bandwidth (Mbps)']!);
+  return [
+    CalculatorResult(
+      label: 'Transfer time',
+      value: time < 1
+          ? (time * 1000).toStringAsFixed(2)
+          : time.toStringAsFixed(3),
+      unit: time < 1 ? 'ms' : 's',
+      icon: Icons.schedule,
+      note: 'Excludes protocol overhead and latency.',
+    ),
+  ];
+}
+
+class _CapacityScreen extends StatelessWidget {
+  const _CapacityScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const CalculatorScreen(
+      title: 'Channel capacity',
+      formula: 'C = B log₂(1 + SNR),  nyquist = 2B',
+      fields: [
+        CalculatorField(label: 'Bandwidth (Hz)'),
+        CalculatorField(label: 'SNR (linear)'),
+      ],
+      compute: _capacity,
+    );
+  }
+}
+
+List<CalculatorResult> _capacity(Map<String, double> input) {
+  final service = NetworkingCalculatorService();
+  final bandwidth = input['Bandwidth (Hz)']!;
+  final snr = input['SNR (linear)']!;
+  if (snr <= 0) {
+    throw const ValidationException('SNR must be greater than zero.');
+  }
+  return [
+    CalculatorResult(
+      label: 'Shannon capacity',
+      value: service.shannonCapacity(bandwidth, snr).toStringAsFixed(2),
+      unit: 'bps',
+      icon: Icons.graphic_eq,
+    ),
+    CalculatorResult(
+      label: 'Nyquist rate',
+      value: service.nyquistRate(bandwidth).toStringAsFixed(2),
+      unit: 'bps',
+      icon: Icons.waves_outlined,
+    ),
+  ];
 }

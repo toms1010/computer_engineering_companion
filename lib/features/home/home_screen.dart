@@ -1,292 +1,374 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../app/app_providers.dart';
-import '../../core/widgets/ui.dart';
-import '../../domain/entities/entities.dart';
-import '../calculators/number_system_calculator_screen.dart';
-import '../calculators/electronics_calculator_screen.dart';
-import '../simulators/cpu_scheduling_screen.dart';
-import '../learning/subject_detail_screen.dart';
 
+import '../../app/providers.dart';
+import '../../app/router.dart';
+import '../../core/design/app_spacing.dart';
+import '../../core/design/app_typography.dart';
+import '../../core/utils/app_time.dart';
+import '../../domain/entities/entities.dart';
+import '../../widgets/app_scaffold.dart';
+import '../../widgets/cards.dart';
+import '../../widgets/performance_watcher.dart';
+import '../../widgets/states.dart';
+
+/// Dashboard.
+///
+/// Rebuilt on: profile name, progress stats, subjects, activity. Each of those
+/// is watched through the narrowest provider that exists, and the derived
+/// values (percentage, greeting, relative time) are computed once per build
+/// rather than per row.
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final subjectsAsync = ref.watch(subjectsProvider);
-    final activitiesAsync = ref.watch(activitiesProvider);
-    final progressAsync = ref.watch(progressStatsProvider);
-    final name = ref.watch(profileNameProvider).valueOrNull ?? 'Student';
+    final name = ref.watch(profileNameProvider).valueOrNull ??
+        ProfileNameNotifier.fallback;
+    final stats = ref.watch(progressStatsProvider);
+    final subjects = ref.watch(subjectsProvider);
+    final activity = ref.watch(activitiesProvider);
+    // One clock read per build, shared by every relative-time label, so a
+    // rebuild does not call `DateTime.now()` once per row.
+    final now = DateTime.now();
 
-    return PageFrame(
-      title: 'Home',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Good ${_greeting()}, $name',
-            style: Theme.of(context)
-                .textTheme
-                .headlineSmall
-                ?.copyWith(fontWeight: FontWeight.w800),
+    return ScreenPerformanceWatcher(
+      name: 'Home',
+      child: AppScaffold(
+        title: 'Home',
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.of(context).pushNamed(AppRoutes.progress),
+            icon: const Icon(Icons.insights_outlined),
+            tooltip: 'Progress',
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Continue your engineering journey.',
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          IconButton(
+            onPressed: () =>
+                Navigator.of(context).pushNamed(AppRoutes.bookmarks),
+            icon: const Icon(Icons.bookmark_outline),
+            tooltip: 'Bookmarks',
           ),
-          const SizedBox(height: 20),
-          progressAsync.when(
-            data: (stats) => _ProgressCard(stats: stats),
-            loading: () => const Card(
-                child: Padding(
-                    padding: EdgeInsets.all(22),
-                    child: Center(child: CircularProgressIndicator()))),
+        ],
+        slivers: [
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Good ${AppTime.greeting(now)}, $name',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  'Continue your engineering journey.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+              ],
+            ),
+          ),
+
+          // Overall progress.
+          stats.when(
+            data: (data) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+              child: _ProgressCard(stats: data),
+            ),
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+              child: SkeletonBox(height: 148, radius: 14),
+            ),
             error: (_, __) => const SizedBox.shrink(),
           ),
-          subjectsAsync.when(
-            data: (subjects) {
-              final next = subjects
-                  .where((s) => s.progress < 1.0)
-                  .cast<Subject?>()
-                  .firstWhere((s) => true, orElse: () => subjects.isEmpty ? null : subjects.first);
-              if (next == null) return const SizedBox.shrink();
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SectionTitle('Continue learning'),
-                  _SubjectCard(subject: next),
-                ],
-              );
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
+
+          // The assistant is a headline feature, so it gets a first-class
+          // card on the dashboard rather than being buried in a menu.
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+              child: ContentCard(
+                onTap: () =>
+                    Navigator.of(context).pushNamed(AppRoutes.assistant),
+                semanticLabel:
+                    'Study assistant. Ask questions using the offline curriculum.',
+                child: Row(
+                  children: [
+                    Icon(Icons.auto_awesome,
+                        color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Ask the study assistant',
+                              style:
+                                  Theme.of(context).textTheme.titleSmall),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Answers from the curriculum on this device. '
+                            'Works offline.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+              ),
+            ),
           ),
-          const SectionTitle('Quick tools'),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _QuickTool(
-                'Ohm\'s Law',
-                Icons.bolt_outlined,
-                () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            const ElectronicsCalculatorScreen(initial: 'ohms'))),
-              ),
-              _QuickTool(
-                'Number System',
-                Icons.numbers_outlined,
-                () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            const NumberSystemCalculatorScreen())),
-              ),
-              _QuickTool(
-                'CPU Scheduling',
-                Icons.timeline_outlined,
-                () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const CpuSchedulingScreen())),
-              ),
-              _QuickTool(
-                'Subnetting',
-                Icons.lan_outlined,
-                () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            const NumberSystemCalculatorScreen())),
-              ),
-            ],
-          ),
-          const SectionTitle('Recent activity'),
-          activitiesAsync.when(
-            data: (activities) {
-              if (activities.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Text('No activity yet. Start learning!'),
+
+          const SectionHeader(title: 'Continue learning'),
+          subjects.when(
+            data: (all) {
+              final next = _nextSubject(all);
+              if (next == null) {
+                return const SliverToBoxAdapter(
+                  child: Padding(
+                    padding:
+                        EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+                    child: EmptyStateView(
+                      icon: Icons.school_outlined,
+                      title: 'Curriculum unavailable',
+                      message:
+                          'The subject list could not be read from this device.',
+                    ),
+                  ),
                 );
               }
-              return Column(
-                children: [
-                  for (final item in activities.take(5))
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.history,
-                          color: Theme.of(context).colorScheme.primary),
-                      title: Text(item.description),
-                      subtitle: Text(_timeAgo(item.createdAt)),
-                    ),
-                ],
+              return SliverToBoxAdapter(
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+                  child: _SubjectCard(
+                    key: ValueKey(next.id),
+                    subject: next,
+                  ),
+                ),
               );
             },
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
+            loading: () => const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: AppSpacing.gutter),
+                child: SkeletonBox(height: 96, radius: 14),
+              ),
+            ),
+            error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
+          ),
+
+          const SectionHeader(
+            title: 'Quick tools',
+            subtitle: 'Jump straight into a calculator',
+          ),
+          const SliverToBoxAdapter(child: _QuickTools()),
+
+          const SectionHeader(title: 'Recent activity'),
+          activity.when(
+            data: (items) {
+              if (items.isEmpty) {
+                return const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                        AppSpacing.gutter, AppSpacing.sm, AppSpacing.gutter, 0),
+                    child: Text('No activity yet. Start with a lesson!'),
+                  ),
+                );
+              }
+              return LazySliverList(
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return AppListRow(
+                    key: ValueKey(item.id),
+                    title: item.description,
+                    subtitle: Text(AppTime.relative(item.createdAt, now: now)),
+                    leading: Icon(
+                      Icons.history,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    onTap: null,
+                  );
+                },
+              );
+            },
+            loading: () => const SkeletonList(itemCount: 3, hasLeading: true),
+            error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
           ),
         ],
       ),
     );
   }
 
-  String _greeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return 'morning';
-    if (hour < 17) return 'afternoon';
-    return 'evening';
-  }
-
-  String _timeAgo(DateTime time) {
-    final diff = DateTime.now().difference(time);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-    if (diff.inDays < 1) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+  /// First subject that is not finished.
+  ///
+  /// `firstWhere` with a short-circuiting predicate replaces the previous
+  /// `where(...).cast<Subject?>().firstWhere(...)`, which allocated two
+  /// throwaway lists and evaluated `progress` for every subject.
+  static Subject? _nextSubject(List<Subject> subjects) {
+    if (subjects.isEmpty) return null;
+    for (final subject in subjects) {
+      if (subject.progress < 1.0) return subject;
+    }
+    return subjects.first;
   }
 }
 
 class _ProgressCard extends StatelessWidget {
   const _ProgressCard({required this.stats});
+
   final ProgressStats stats;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final percent = (stats.overallProgress * 100).round();
-    return Card(
+
+    return ContentCard(
       color: scheme.primaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('OVERALL PROGRESS',
-                style: Theme.of(context)
-                    .textTheme
-                    .labelMedium
-                    ?.copyWith(color: scheme.onPrimaryContainer)),
-            const SizedBox(height: 4),
-            Text('$percent%',
-                style: Theme.of(context)
-                    .textTheme
-                    .displaySmall
-                    ?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: scheme.onPrimaryContainer)),
-            const SizedBox(height: 12),
-            ProgressLine(stats.overallProgress),
-            const SizedBox(height: 12),
-            Text(
-              '${stats.lessonsCompleted} of ${stats.totalLessons} lessons • ${stats.quizzesCompleted} quizzes',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: scheme.onPrimaryContainer),
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      semanticLabel:
+          'Overall progress: $percent percent, ${stats.lessonsCompleted} of ${stats.totalLessons} lessons complete',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('OVERALL PROGRESS', style: AppTypography.overline(context)),
+          const SizedBox(height: AppSpacing.xxs),
+          Text(
+            '$percent%',
+            style: theme.textTheme.displaySmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: scheme.onPrimaryContainer,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          ProgressBar(
+            value: stats.overallProgress,
+            label: 'Lessons completed',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            '${stats.lessonsCompleted} of ${stats.totalLessons} lessons'
+            ' • ${stats.quizzesCompleted} quizzes'
+            '${stats.studyStreakDays > 0 ? ' • ${stats.studyStreakDays} day streak' : ''}',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: scheme.onPrimaryContainer),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _SubjectCard extends StatelessWidget {
-  const _SubjectCard({required this.subject});
+  const _SubjectCard({super.key, required this.subject});
+
   final Subject subject;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => SubjectDetailScreen(subject: subject)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: scheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(subject.iconData,
-                    color: scheme.onSecondaryContainer),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(subject.name,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 16)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${subject.completedLessons}/${subject.totalLessons} lessons',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 8),
-                    ProgressLine(subject.progress),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
-            ],
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return ContentCard(
+      onTap: () => Navigator.of(context).pushNamed(
+        AppRoutes.subject,
+        arguments: {RouteArgs.subject: subject},
+      ),
+      semanticLabel: '${subject.name}, '
+          '${subject.completedLessons} of ${subject.totalLessons} lessons complete',
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: scheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(AppSpacing.md),
+            ),
+            child: Icon(subject.iconData, color: scheme.onSecondaryContainer),
           ),
-        ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(subject.name, style: theme.textTheme.titleMedium),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  '${subject.completedLessons}/${subject.totalLessons} lessons',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                ProgressBar(
+                  value: subject.progress,
+                  label: '${subject.name} progress',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+        ],
       ),
     );
   }
 }
 
-class _QuickTool extends StatelessWidget {
-  const _QuickTool(this.label, this.icon, this.onTap);
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
+class _QuickTools extends StatelessWidget {
+  const _QuickTools();
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: (MediaQuery.sizeOf(context).width - 52) / 2,
-      height: 88,
-      child: Card(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(icon, color: Theme.of(context).colorScheme.primary),
-                const Spacer(),
-                Text(label,
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
-              ],
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    const tools = [
+      (label: 'Ohm’s Law', icon: Icons.bolt_outlined, route: AppRoutes.electronics),
+      (label: 'Number System', icon: Icons.numbers_outlined, route: AppRoutes.numberSystem),
+      (label: 'CPU Scheduling', icon: Icons.timeline_outlined, route: AppRoutes.cpuScheduling),
+      (label: 'Subnetting', icon: Icons.lan_outlined, route: AppRoutes.networking),
+    ];
+
+    return ResponsiveGrid(
+      maxColumns: 4,
+      itemCount: tools.length,
+      itemBuilder: (context, index) {
+        final tool = tools[index];
+        return Card(
+          child: InkWell(
+            onTap: () => Navigator.of(context).pushNamed(
+              tool.route,
+              arguments: tool.route == AppRoutes.electronics
+                  ? {RouteArgs.toolId: 'ohms'}
+                  : null,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(tool.icon, color: scheme.primary),
+                  const Spacer(),
+                  Text(
+                    tool.label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
